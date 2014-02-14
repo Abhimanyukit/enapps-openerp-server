@@ -1,0 +1,5 @@
+install/openerp-server.conf /etc/openerp
+install/openerp-cron-worker.conf /etc/openerp
+install/openerp_gunicorn.conf.py /etc/openerp
+install/etc /
+README /usr/share/doc/openerp
