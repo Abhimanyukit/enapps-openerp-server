@@ -41,7 +41,7 @@
         $ git clone git@github.com:enapps/enapps-openerp-server.git ea_server
         $ git clone git@github.com:enapps/enapps-web-client.git ea_web
 
-7. Install additional sodftware for web client:
+7. Install additional software for web client:
 
         $ cd /opt/openerp/ea_web
         $ git clone https://github.com/joyent/node.git
