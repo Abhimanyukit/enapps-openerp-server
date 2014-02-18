@@ -73,7 +73,7 @@
         $ sudo /etc/init.d/openerp-server start
 
 ----
-To access admin panel go to [http://yourupaddress:8069/admin](http://yourupaddress:8069/admin) and log in using you supersuer credentials (password you enter for DB backup etc). Following items can be found after accessing admin panel:
+To access admin panel go to [http://yourupaddress:8069/admin](http://youripaddress:8069/admin) and log in using you supersuer credentials (password you enter for DB backup etc). Following items can be found after accessing admin panel:
 
 - *__Create__* - create new DB;
 - *__Drop__* - drop selected DB;
