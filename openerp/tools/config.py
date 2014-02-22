@@ -163,6 +163,10 @@ class configmanager(object):
                          help="Domain level name relative base domain name which is equal database name. For example: production_db.my.company.com where my.company.com is base domain -- domain_level_db_name = 1 ")
         group.add_option("--domain-level-user-name", dest="domain_level_user_name", my_default=0,
                          help="Domain level name which is equal user name. For example: admin.production_db.my.company.com, where my.company.com is base domain -- domain_level_user_name = 2 ")
+        group.add_option("--admin-user", dest="admin_user", my_default='admin',
+                         help="Admin user name")
+        group.add_option("--main-domain-for-admin", dest="main_domain_for_admin", my_default=False,
+                         help="Redirect all request for main domain to Databases Management page")
         parser.add_option_group(group)
 
         # Static HTTP
@@ -301,6 +305,10 @@ class configmanager(object):
                          type="int")
         group.add_option("--unaccent", dest="unaccent", my_default=False, action="store_true",
                          help="Use the unaccent function provided by the database when available.")
+        group.add_option("--connection-lifetime", dest="connection_lifetime", my_default=300, action="store_true",
+                         help="Lifetime of connection in connection pool (seconds). Default 300 sec. For disabling set 0")
+        group.add_option("--cursor-timeout", dest="cursor_timeout", my_default=0, action="store_true",
+                         help="Timeout of using cursor connection in connection pool (seconds). Disabled by default. For disabling set 0")
         parser.add_option_group(group)
 
         # Copy all optparse options (i.e. MyOption) into self.options.
@@ -390,6 +398,7 @@ class configmanager(object):
                 'static_http_enable', 'static_http_document_root', 'static_http_url_prefix',
                 'secure_cert_file', 'secure_pkey_file', 'dbfilter', 'log_handler', 'log_level',
                 'domain_level_db_name', 'domain_level_user_name', 'domain_list', 'do_not_allow_db_list',
+                'admin_user', 'main_domain_for_admin', 'cursor_timeout', 'connection_lifetime',
                 ]
 
         for arg in keys:

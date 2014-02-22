@@ -53,6 +53,7 @@ import simplejson
 import time
 import types
 from lxml import etree
+from functools import wraps
 
 import fields
 import openerp
@@ -63,6 +64,7 @@ from openerp.tools.safe_eval import safe_eval as eval
 from openerp.tools.translate import _
 from openerp import SUPERUSER_ID
 from query import Query
+import osv
 
 _logger = logging.getLogger(__name__)
 _schema = logging.getLogger(__name__ + '.schema')
@@ -70,8 +72,29 @@ _schema = logging.getLogger(__name__ + '.schema')
 # List of etree._Element subclasses that we choose to ignore when parsing XML.
 from openerp.tools import SKIPPED_ELEMENT_TYPES
 
-regex_order = re.compile('^(([a-z0-9_]+|"[a-z0-9_]+")( *desc| *asc)?( *, *|))+$', re.I)
+regex_order = re.compile('^((\w(\.\w)?)( *desc| *asc)?( *, *|))+$', re.I)
 regex_object_name = re.compile(r'^[a-z0-9_.]+$')
+
+
+def allowed_states(state_list, not_allowed='except'):
+    def inner_allowed_states(f):
+        def wrapper(obj, cr, uid, ids, *args, **kwargs):
+            allowed_ids = obj.search(cr, uid, [
+                ('state', 'in', state_list),
+                ('id', 'in', ids),
+            ], context=kwargs.get('context', {}), )
+            if set(ids) != set(allowed_ids):
+                if not_allowed == 'skip':
+                    ids = allowed_ids
+                elif not_allowed == 'except':
+                    raise osv.except_osv(
+                        "Error!",
+                        "%s id: %s is not in %s state(s)" % (obj._description, ids, ", ".join(state_list)),
+                    )
+            return f(obj, cr, uid, ids, *args, **kwargs)
+        return wraps(f)(wrapper)
+    return inner_allowed_states
+
 
 def transfer_field_to_modifiers(field, modifiers):
     default_values = {}
@@ -1077,6 +1100,11 @@ class BaseModel(object):
         tools.drop_view_if_exists(cr, view_name)
         query = ' CREATE OR REPLACE view ' + view_name + ' AS ( ' + query + ' )'
         cr.execute(query)
+        cr.execute(''' select table_name from information_schema.tables where table_name = 'ea_pg_matviews' ''')
+        if cr.fetchall():
+            cr.execute('''UPDATE ea_pg_matviews
+                SET query_update = False
+                WHERE name='%s' ''' % view_name)
         return True
 
     def create_replace_mview(self, cr, query, view_name, **kwargs):
@@ -1091,15 +1119,16 @@ class BaseModel(object):
                 return True
         def create_mview(cr, view_name, query, **kwargs):
             #create materialized view query
-            mview_query = ' CREATE MATERIALIZED view ' + view_name + ' AS ( ' + query + ' )'
+            mview_query = ' CREATE MATERIALIZED view ' + view_name + ' AS ( ' + query + ' )' + ' WITH NO DATA'
             cr.execute(mview_query)
             if kwargs.get('view_query_existing'):
                 cr.execute('''UPDATE ea_pg_matviews
-                            SET view_query = %s
+                            SET view_query = %s,
+                            query_update = False
                             WHERE name=%s''', (query, view_name))
             else:
-                cr.execute('''INSERT INTO ea_pg_matviews (name, view_query) VALUES 
-                            (%s, %s)''', (view_name, query))
+                cr.execute('''INSERT INTO ea_pg_matviews (name, view_query, query_update) VALUES 
+                            (%s, %s, False)''', (view_name, query))
             return True
         #TODO: check version and if < 9.3 remove materialised view and run create_replace_view method
         if self.get_postgres_version(cr) < 9.3:
@@ -1124,11 +1153,16 @@ class BaseModel(object):
             #create ea_pg_matviews table if not exists
             cr.execute('''CREATE TABLE ea_pg_matviews (
             name char(128) CONSTRAINT firstkey PRIMARY KEY,
-            view_query text ) ''')
+            view_query text,
+            query_update boolean) ''')
 
         if not view_query_existing:
             #remove from views in case it's present there
-            cr.execute('''DROP VIEW IF EXISTS %s''' % view_name)
+            cr.execute('''SELECT matviewname FROM pg_matviews WHERE matviewname = '%s' ''' % (view_name))
+            if not cr.fetchall():
+                cr.execute('''DROP VIEW IF EXISTS %s''' % view_name)
+            else:
+                cr.execute('''DROP MATERIALIZED VIEW %s''' % view_name)
             #create materialized view
             create_mview(cr, view_name, query, **kwargs)
         else:
@@ -1146,6 +1180,9 @@ class BaseModel(object):
         if self.get_postgres_version(cr) >= 9.3:
             cr.execute('''SELECT matviewname FROM pg_matviews WHERE matviewname = '%s' ''' % (self._table))
             if cr.fetchone():
+                cr.execute('''UPDATE ea_pg_matviews
+                            SET query_update = True
+                            WHERE name='%s' ''' % self._table)
                 cr.execute("REFRESH MATERIALIZED VIEW %s" % (self._table))
         return {}
 
@@ -2119,6 +2156,16 @@ class BaseModel(object):
         :raise Invalid ArchitectureError: if there is view type other than form, tree, calendar, search etc defined on the structure
 
         """
+        if not self._auto:
+            cr.execute(''' select table_name from information_schema.tables where table_name = 'ea_pg_matviews' ''')
+            if cr.fetchall():
+                cr.execute('''SELECT name FROM ea_pg_matviews
+                            WHERE query_update in (False, Null)
+                            AND name='%s' ''' % self._table)
+                query_result = cr.fetchall()
+                if query_result:
+                    raise except_orm(_('View Error'),
+                            _('Please refresh materialized View of current model in Scheduled Actions'))
         inheritance_chain = []
         if context is None:
             context = {}
@@ -2817,6 +2864,26 @@ class BaseModel(object):
             result = self._read_group_fill_results(cr, uid, domain, groupby, groupby_list,
                                                    aggregated_fields, result, read_group_order=order,
                                                    context=context)
+        if result and orderby:
+            result = self.read_group_order_by(cr, uid, group_result=result, orderby=orderby, context=context)
+        return result
+
+    def read_group_order_by(self, cr, uid, group_result, orderby, context={}):
+        result = group_result
+        for order_item in reversed(orderby.split(',')):
+            reverse = True
+            order_item =  order_item.strip()
+            order_item = re.sub(' +',' ',order_item)
+            order_item_spl = order_item.split(' ')
+            if len(order_item_spl) == 1:
+                order_field = order_item_spl[0]
+            elif len(order_item_spl) == 2:
+                order_field = order_item_spl[0]
+                if re.match('desc', order_item_spl[1], re.IGNORECASE):
+                    reverse = False
+            else:
+                continue
+            result = sorted(result, key=lambda k: k[order_field], reverse=reverse)
         return result
 
     def _inherits_join_add(self, current_table, parent_model_name, query):
@@ -4845,7 +4912,7 @@ class BaseModel(object):
             kwargs = dict(parent_model=inherited_model, child_object=self) #workaround for python2.5
             apply_rule(*rule_obj.domain_get(cr, uid, inherited_model, mode, context=context), **kwargs)
 
-    def _generate_m2o_order_by(self, order_field, query):
+    def _generate_m2o_order_by(self, order_field, query, **kwargs):
         """
         Add possibly missing JOIN to ``query`` and generate the ORDER BY clause for m2o fields,
         either native m2o fields or function/related fields that are stored, including
@@ -4870,7 +4937,7 @@ class BaseModel(object):
 
         # figure out the applicable order_by for the m2o
         dest_model = self.pool.get(order_field_column._obj)
-        m2o_order = dest_model._order
+        m2o_order = kwargs.get('m2o_orderfield') or dest_model._order
         if not regex_order.match(m2o_order):
             # _order is complex, can't use it here, so we default to _rec_name
             m2o_order = dest_model._rec_name
@@ -4889,6 +4956,19 @@ class BaseModel(object):
         return map(qualify, m2o_order) if isinstance(m2o_order, list) else qualify(m2o_order)
 
 
+    def get_m2o_orderfieldname(self, order_split):
+        ''' 'm2o_orderfield' attribute can be passed through order for many2one field
+        i.e: _order attribute in ea_crm_stage is 'sequence'
+        stage_id is m2o field in ea_crm_opportunity to ea_crm_stage
+        if i'll pass in ea_crm_opportunity search order: "stage_id ASC m2o_orderfield#name"
+        i'll get ordering of 'stages' by 'name'
+        '''
+        for item in order_split:
+            if item:
+                if '.' in item and len(item.split('.')) == 2:
+                    return {'m2o_orderfield': item.split('.')[1]}
+        return {}
+
     def _generate_order_by(self, order_spec, query):
         """
         Attempt to consruct an appropriate ORDER BY clause based on order_spec, which must be
@@ -4899,11 +4979,15 @@ class BaseModel(object):
         order_by_clause = self._order
         if order_spec:
             order_by_elements = []
+            # regex replace was added here to allow get_m2o_orderfieldname functionality
             self._check_qorder(order_spec)
+
             for order_part in order_spec.split(','):
                 order_split = order_part.strip().split(' ')
                 order_field = order_split[0].strip()
-                order_direction = order_split[1].strip() if len(order_split) == 2 else ''
+                if '.' in order_field:
+                    order_field = order_field.split('.')[0]
+                order_direction = order_split[1].strip() if (len(order_split) == 2) else ''
                 inner_clause = None
                 if order_field == 'id':
                     inner_clause = '"%s"."%s"' % (self._table, order_field)
@@ -4912,7 +4996,8 @@ class BaseModel(object):
                     if order_column._classic_read:
                         inner_clause = '"%s"."%s"' % (self._table, order_field)
                     elif order_column._type == 'many2one':
-                        inner_clause = self._generate_m2o_order_by(order_field, query)
+                        kwargs = self.get_m2o_orderfieldname(order_split)
+                        inner_clause = self._generate_m2o_order_by(order_field, query, **kwargs)
                     else:
                         continue # ignore non-readable or "non-joinable" fields
                 elif order_field in self._inherit_fields:
@@ -4921,7 +5006,8 @@ class BaseModel(object):
                     if order_column._classic_read:
                         inner_clause = self._inherits_join_calc(order_field, query)
                     elif order_column._type == 'many2one':
-                        inner_clause = self._generate_m2o_order_by(order_field, query)
+                        kwargs = self.get_m2o_orderfieldname(order_split)
+                        inner_clause = self._generate_m2o_order_by(order_field, query, **kwargs)
                     else:
                         continue # ignore non-readable or "non-joinable" fields
                 if inner_clause:
@@ -4932,7 +5018,6 @@ class BaseModel(object):
                         order_by_elements.append("%s %s" % (inner_clause, order_direction))
             if order_by_elements:
                 order_by_clause = ",".join(order_by_elements)
-
         return order_by_clause and (' ORDER BY %s ' % order_by_clause) or ''
 
     def _search(self, cr, user, args, offset=0, limit=None, order=None, context=None, count=False, access_rights_uid=None):

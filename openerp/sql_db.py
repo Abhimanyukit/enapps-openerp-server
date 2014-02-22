@@ -43,6 +43,11 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT, ISOLATION_LEVEL_READ
 from psycopg2.pool import PoolError
 from psycopg2.psycopg1 import cursor as psycopg1cursor
 from threading import currentThread
+import time
+from tools import config
+
+CURSOR_TIMEOUT = int(config.get('cursor_timeout', "0")) # Disabled by default
+CONNECTION_LIFETIME = int(config.get('connection_lifetime', "300")) # 5 minutes by default
 
 psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)
 
@@ -157,19 +162,21 @@ class Cursor(object):
     def __init__(self, pool, dbname, serialized=True):
         self.sql_from_log = {}
         self.sql_into_log = {}
+        self.last_execution_time = None
 
         # default log level determined at cursor creation, could be
         # overridden later for debugging purposes
         self.sql_log = _logger.isEnabledFor(logging.DEBUG)
 
         self.sql_log_count = 0
-        self.__closed = True    # avoid the call of close() (by __del__) if an exception
-                                # is raised by any of the following initialisations
+        self.__closed = True # avoid the call of close() (by __del__) if an exception
+                             # is raised by any of the following initialisations
+        self.executing = False
         self._pool = pool
         self.dbname = dbname
 
         # Whether to enable snapshot isolation level for this cursor.
-        # see also the docstring of Cursor.  
+        # see also the docstring of Cursor.
         self._serialized = serialized
 
         self._cnx = pool.borrow(dsn(dbname))
@@ -201,6 +208,9 @@ class Cursor(object):
 
     @check
     def execute(self, query, params=None, log_exceptions=None):
+        self._cnx.init_time
+        self._cnx.last_execution_time = time.time()
+        self._cnx.executing = True
         if '%d' in query or '%f' in query:
             _logger.warning(query)
             _logger.warning("SQL queries cannot contain %d or %f anymore. "
@@ -220,6 +230,7 @@ class Cursor(object):
             if (self._default_log_exceptions if log_exceptions is None else log_exceptions):
                 _logger.exception("bad query: %s", self._obj.query or query)
             raise
+        self._cnx.executing = False
 
         if self.sql_log:
             delay = mdt.now() - now
@@ -385,15 +396,21 @@ class ConnectionPool(object):
     def _debug(self, msg, *args):
         _logger.debug(('%r ' + msg), self, *args)
 
+    def _info(self, msg, *args):
+        _logger.info(('%r ' + msg), self, *args)
+
     @locked
     def borrow(self, dsn):
         self._debug('Borrow connection to %r', dsn)
 
         # free dead and leaked connections
+        time_now = time.time()
         for i, (cnx, _) in tools.reverse_enumerate(self._connections):
-            if cnx.closed:
+            if (cnx.closed or (not cnx.executing and time_now - cnx.init_time > CONNECTION_LIFETIME) or (cnx.executing and CURSOR_TIMEOUT and time_now - cnx.last_execution_time > CURSOR_TIMEOUT)):
                 self._connections.pop(i)
                 self._debug('Removing closed connection at index %d: %r', i, cnx.dsn)
+                if not cnx.closed:
+                    cnx.close() # Close unclosed connection.
                 continue
             if getattr(cnx, 'leaked', False):
                 delattr(cnx, 'leaked')
@@ -427,9 +444,10 @@ class ConnectionPool(object):
             else:
                 # note: this code is called only if the for loop has completed (no break)
                 raise PoolError('The Connection Pool Is Full')
-
         try:
             result = psycopg2.connect(dsn=dsn, connection_factory=PsycoConnection)
+            result.init_time = time.time()
+            result.executing = False
         except psycopg2.Error:
             _logger.exception('Connection to the database failed')
             raise
@@ -498,12 +516,13 @@ def dsn(db_name):
 
     return '%sdbname=%s' % (_dsn, db_name)
 
+def dsn_dict(dsn):
+    k = dict(x.split('=', 1) for x in dsn.strip().split())
+    k.pop('password', None) # password is not relevant
+    return k
+
 def dsn_are_equals(first, second):
-    def key(dsn):
-        k = dict(x.split('=', 1) for x in dsn.strip().split())
-        k.pop('password', None) # password is not relevant
-        return k
-    return key(first) == key(second)
+    return dsn_dict(first) == dsn_dict(second)
 
 
 _Pool = None
