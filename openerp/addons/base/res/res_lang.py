@@ -127,7 +127,7 @@ class lang(osv.osv):
         return True
 
     def _get_default_date_format(self, cursor, user, context=None):
-        return '%m/%d/%Y'
+        return '%d/%m/%Y'
 
     def _get_default_time_format(self, cursor, user, context=None):
         return '%H:%M:%S'
@@ -184,8 +184,8 @@ class lang(osv.osv):
         languages = self.read(cr, uid, ids, ['code','active'], context=context)
         for language in languages:
             ctx_lang = context.get('lang')
-            if language['code']=='en_US':
-                raise osv.except_osv(_('User Error'), _("Base Language 'en_US' can not be deleted !"))
+            if language['code']=='en_GB':
+                raise osv.except_osv(_('User Error'), _("Base Language 'en_GB' can not be deleted !"))
             if ctx_lang and (language['code']==ctx_lang):
                 raise osv.except_osv(_('User Error'), _("You cannot delete the language which is User's Preferred Language !"))
             if language['active']:

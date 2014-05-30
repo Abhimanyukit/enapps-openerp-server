@@ -260,7 +260,7 @@ class ir_ui_menu(osv.osv):
         return res
 
     _columns = {
-        'name': fields.char('Menu', size=64, required=True, translate=True),
+        'name': fields.char('Menu', size=64, required=True, ),
         'sequence': fields.integer('Sequence'),
         'child_id' : fields.one2many('ir.ui.menu', 'parent_id','Child IDs'),
         'parent_id': fields.many2one('ir.ui.menu', 'Parent Menu', select=True),

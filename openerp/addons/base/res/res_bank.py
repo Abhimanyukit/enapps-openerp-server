@@ -59,10 +59,10 @@ class res_partner_bank_type(osv.osv):
     _name = 'res.partner.bank.type'
     _order = 'name'
     _columns = {
-        'name': fields.char('Name', size=64, required=True, translate=True),
+        'name': fields.char('Name', size=64, required=True, ),
         'code': fields.char('Code', size=64, required=True),
         'field_ids': fields.one2many('res.partner.bank.type.field', 'bank_type_id', 'Type fields'),
-        'format_layout': fields.text('Format Layout', translate=True)
+        'format_layout': fields.text('Format Layout', )
     }
     _defaults = {
         'format_layout': lambda *args: "%(bank_name)s: %(acc_number)s"
@@ -74,7 +74,7 @@ class res_partner_bank_type_fields(osv.osv):
     _name = 'res.partner.bank.type.field'
     _order = 'name'
     _columns = {
-        'name': fields.char('Field Name', size=64, required=True, translate=True),
+        'name': fields.char('Field Name', size=64, required=True, ),
         'bank_type_id': fields.many2one('res.partner.bank.type', 'Bank Type', required=True, ondelete='cascade'),
         'required': fields.boolean('Required'),
         'readonly': fields.boolean('Readonly'),

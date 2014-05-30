@@ -283,8 +283,7 @@ class db(netsvc.ExportService):
             if tools.config['db_port']:
                 cmd.append('--port=' + str(tools.config['db_port']))
             cmd.append('--dbname=' + db_name)
-            if subprocess.call(cmd, stdin=data):
-                raise Exception("Couldn't restore database")
+            subprocess.call(cmd, stdin=data)
             _logger.info('RESTORE DB: %s' % (db_name))
 
             db = sql_db.db_connect(db_name)

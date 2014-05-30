@@ -378,10 +378,13 @@ def init_module_models(cr, module_name, obj_list):
         result = obj._auto_init(cr, {'module': module_name})
         if result:
             todo += result
-        if hasattr(obj, 'init'):
-            obj.init(cr)
         cr.commit()
     for obj in obj_list:
+        cr.execute('''select table_name from information_schema.tables
+                     where table_name = %s ''', (obj._table, ))
+        query_result = cr.fetchall()
+        if not query_result:
+            obj.init(cr)
         obj._auto_end(cr, {'module': module_name})
         cr.commit()
     todo.sort()

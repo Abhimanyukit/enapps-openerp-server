@@ -20,10 +20,16 @@
 ##############################################################################
 
 import itertools
+import logging
 
 from osv import fields,osv
 from osv.orm import except_orm
 import tools
+import time
+import os
+
+_logger = logging.getLogger(__name__)
+
 
 class ir_attachment(osv.osv):
     def check(self, cr, uid, ids, mode, context=None, values=None):
@@ -121,8 +127,47 @@ class ir_attachment(osv.osv):
         self.check(cr, uid, ids, 'unlink', context=context)
         return super(ir_attachment, self).unlink(cr, uid, ids, context)
 
+    def isbinarydata(self, block):
+        """ Uses heuristics to guess whether the given file is base64 or binary,
+            by reading a single block of bytes from the file.
+            If more than 30% of the chars in the block are non-text, or there
+            are NUL ('\x00') bytes in the block, assume this is a binary file.
+        """
+        _text_characters = (b''.join(chr(i) for i in range(32, 127)) + b'\n\r\t\f\b')
+        if b'\x00' in block:
+            # Files with null bytes are binary
+            return True
+
+        # Use translate's 'deletechars' argument to efficiently remove all
+        # occurrences of _text_characters from the block
+        nontext = block.translate(None, _text_characters)
+        return float(len(nontext)) / len(block) > 0.30
+
     def create(self, cr, uid, values, context=None):
+        if values.get('datas') and not self.isbinarydata(values['datas']):
+            try:
+                values['datas'] = values['datas'].decode('base64')  # Originally datas was base64 encoded string, keep it for backwards compatability with standard addons
+            except:
+                _logger.error("Unable to decode content for %s", values['name'])
         self.check(cr, uid, [], mode='create', context=context, values=values)
+        if context and context.get('sidebar_attachment'):
+            values['datas'] = self.upload_image(cr, uid, False, values, 'datas', self._columns['datas'].uploadfolder, False, content=values['datas'], filename=values.get('datas_fname'), context={})
+        if values.get('datas') and not values.get('datas_fname'):
+            values['datas_fname'] = values['datas'].split(os.path.sep)[-1]
+        if values.get('datas_fname') and values.get('res_id') and values.get('res_model'):
+            file_name, file_extension = os.path.splitext(values['datas_fname'])
+            cr.execute("""SELECT count(id)
+                        FROM ir_attachment
+                        WHERE (split_part(datas_fname, '(', 1)=%s
+                            OR datas_fname=%s)
+                        AND res_model=%s
+                        AND res_id=%s""", (file_name, values['datas_fname'], values['res_model'], values['res_id']))
+            attachments_count = cr.fetchone()[0]
+            if attachments_count:
+                new_name = '%s(%d)%s' % (file_name, attachments_count, file_extension)
+                values.update({'name': new_name,
+                                'datas_fname': new_name,
+                })
         return super(ir_attachment, self).create(cr, uid, values, context)
 
     def action_get(self, cr, uid, context=None):
@@ -141,16 +186,19 @@ class ir_attachment(osv.osv):
                 if res_name:
                     field = self._columns.get('res_name',False)
                     if field and len(res_name) > field.size:
-                        res_name = res_name[:field.size-3] + '...' 
+                        res_name = res_name[:field.size-3] + '...'
                 data[attachment.id] = res_name
             else:
                 data[attachment.id] = False
         return data
 
+    def _get_datas_uploadfolder():
+        return '%s,partner_id' % time.strftime('%Y_%m')
+
     _name = 'ir.attachment'
     _columns = {
         'name': fields.char('Attachment Name',size=256, required=True),
-        'datas': fields.binary('Data'),
+        'datas': fields.binary('File Content', uploadfolder=_get_datas_uploadfolder()),
         'datas_fname': fields.char('Filename',size=256),
         'description': fields.text('Description'),
         'res_name': fields.function(_name_get_resname, type='char', size=128,

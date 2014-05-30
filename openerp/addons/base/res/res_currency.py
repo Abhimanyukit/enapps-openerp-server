@@ -30,6 +30,7 @@ from tools.translate import _
 CURRENCY_DISPLAY_PATTERN = re.compile(r'(\w+)\s*(?:\((.*)\))?')
 
 class res_currency(osv.osv):
+
     def _current_rate(self, cr, uid, ids, name, arg, context=None):
         if context is None:
             context = {}
@@ -94,6 +95,31 @@ class res_currency(osv.osv):
             cr.execute("""CREATE UNIQUE INDEX res_currency_unique_name_company_id_idx
                           ON res_currency
                           (name, (COALESCE(company_id,-1)))""")
+        cr.execute('''
+                    CREATE OR REPLACE FUNCTION get_currency_rate(currency integer, to_date date) RETURNS float AS $$
+                        DECLARE c_rate float;
+                    BEGIN
+                    c_rate := (SELECT rate
+                               FROM res_currency_rate
+                               WHERE currency_id IS NOT NULL
+                               AND name IS NOT NULL
+                               AND currency_id = currency
+                               AND name <= to_date
+                               ORDER BY name DESC
+                               LIMIT 1);
+                    IF c_rate IS NULL THEN
+                        c_rate := (SELECT rate
+                        FROM res_currency_rate
+                        WHERE currency_id IS NOT NULL
+                        AND name IS NOT NULL
+                        AND currency_id = currency
+                        ORDER BY name DESC
+                        LIMIT 1);
+                    END IF;
+                    RETURN c_rate;
+                    END;
+                    $$ LANGUAGE plpgsql;''')
+
 
     def read(self, cr, user, ids, fields=None, context=None, load='_classic_read'):
         res = super(res_currency, self).read(cr, user, ids, fields, context, load)
@@ -216,13 +242,44 @@ class res_currency(osv.osv):
             else:
                 return (from_amount * rate)
 
+    def compute_to_date(self, cr, uid, from_currency_id, to_currency_id, from_amount, date=None, round=True, context=None):
+        if date is None:
+            date = time.strftime('%Y-%m-%d')
+        if not from_currency_id:
+            from_currency_id = to_currency_id
+        if not to_currency_id:
+            to_currency_id = from_currency_id
+        xc = self.browse(cr, uid, [from_currency_id, to_currency_id], context=context)
+        to_currency = (xc[0].id == to_currency_id and xc[0]) or xc[1]
+        if to_currency_id == from_currency_id:
+            if round:
+                return self.round(cr, uid, to_currency, from_amount)
+            else:
+                return from_amount
+        else:
+            rate_from = self.get_currency_rate(cr, uid, from_currency_id, date, context=context)
+            rate_to = self.get_currency_rate(cr, uid, to_currency_id, date, context=context)
+            rate = rate_to / rate_from
+            if round:
+                return self.round(cr, uid, to_currency, from_amount * rate)
+            else:
+                return (from_amount * rate)
+
+    def get_currency_rate(self, cr, uid, currency_id, target_date, context={}):
+        if currency_id and isinstance(currency_id, (tuple, list)):
+            currency_id = currency_id[0] # make possible to call get_currency_rate from browse object
+        cr.execute('''SELECT get_currency_rate(%s, %s) as result
+                   ''', (currency_id, target_date, ))
+        result, = cr.fetchone()
+        return result
+
 res_currency()
 
 class res_currency_rate_type(osv.osv):
     _name = "res.currency.rate.type"
     _description = "Currency Rate Type"
     _columns = {
-        'name': fields.char('Name', size=64, required=True, translate=True),
+        'name': fields.char('Name', size=64, required=True, ),
     }
 
 res_currency_rate_type()
@@ -234,7 +291,7 @@ class res_currency_rate(osv.osv):
     _columns = {
         'name': fields.date('Date', required=True, select=True),
         'rate': fields.float('Rate', digits=(12,6), help='The rate of the currency to the currency of rate 1'),
-        'currency_id': fields.many2one('res.currency', 'Currency', readonly=True),
+        'currency_id': fields.many2one('res.currency', 'Currency', readonly=True, select=True),
         'currency_rate_type_id': fields.many2one('res.currency.rate.type', 'Currency Rate Type', help="Allow you to define your own currency rate types, like 'Average' or 'Year to Date'. Leave empty if you simply want to use the normal 'spot' rate type"),
     }
     _defaults = {
@@ -243,6 +300,4 @@ class res_currency_rate(osv.osv):
     _order = "name desc"
 
 res_currency_rate()
-
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
-

@@ -145,7 +145,7 @@ DOMAIN_OPERATORS = (NOT_OPERATOR, OR_OPERATOR, AND_OPERATOR)
 # used. In this case its right operand has the form (subselect, params).
 TERM_OPERATORS = ('=', '!=', '<=', '<', '>', '>=', '=?', '=like', '=ilike',
                   'like', 'not like', 'ilike', 'not ilike', 'in', 'not in',
-                  'child_of')
+                  'child_of', 'is', 'is not', '~', )
 
 # A subset of the above operators, with a 'negative' semantic. When the
 # expressions 'in NEGATIVE_TERM_OPERATORS' or 'not in NEGATIVE_TERM_OPERATORS' are used in the code
@@ -644,7 +644,7 @@ class expression(object):
                              '   WHERE "' + left + '" ' + sql_operator + instr + ")"
 
                     params = [working_table._name + ',' + left,
-                              context.get('lang', False) or 'en_US',
+                              context.get('lang', False) or 'en_GB',
                               'model',
                               right,
                               right,
@@ -654,7 +654,6 @@ class expression(object):
 
     def __leaf_to_sql(self, leaf, table):
         left, operator, right = leaf
-
         # final sanity checks - should never fail
         assert operator in (TERM_OPERATORS + ('inselect',)), \
             "Invalid operator %r in domain term %r" % (operator, leaf)
@@ -727,6 +726,12 @@ class expression(object):
 
         elif (right is False or right is None) and (operator == '!='):
             query = '%s."%s" IS NOT NULL' % (table._table, left)
+            params = []
+
+        elif right in (True, False, None) and operator in ('is','is not'):
+            if operator == None:
+                operator = 'Null'
+            query = '%s."%s" %s %s' % (table._table, left, operator, right)
             params = []
 
         elif (operator == '=?'):

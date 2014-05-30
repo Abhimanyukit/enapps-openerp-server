@@ -61,7 +61,7 @@ class ir_filters(osv.osv):
             cr.execute('CREATE UNIQUE INDEX "ir_filters_name_model_uid_unique_index" ON ir_filters (lower(name), model_id, user_id)')
 
     _columns = {
-        'name': fields.char('Filter Name', size=64, translate=True, required=True),
+        'name': fields.char('Filter Name', size=64, required=True),
         'user_id':fields.many2one('res.users', 'User', help="The user this filter is available to. When left empty the filter is usable by the system only."),
         'domain': fields.text('Domain Value', required=True),
         'context': fields.text('Context Value', required=True),

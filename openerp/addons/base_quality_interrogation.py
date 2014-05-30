@@ -165,7 +165,7 @@ def wait(id,url=''):
     return True
 
 
-def create_db(uri, dbname, user='admin', pwd='admin', lang='en_US'):
+def create_db(uri, dbname, user='admin', pwd='admin', lang='en_GB'):
     conn = xmlrpclib.ServerProxy(uri + '/xmlrpc/db')
     obj_conn = xmlrpclib.ServerProxy(uri + '/xmlrpc/object')
     wiz_conn = xmlrpclib.ServerProxy(uri + '/xmlrpc/wizard')

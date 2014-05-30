@@ -47,6 +47,7 @@
                         <separator orientation="vertical"/>
                         <filter icon="terp-check" string="Installed" domain="[('state', 'in', ['installed', 'to upgrade', 'to remove'])]"/>
                         <filter icon="gtk-cancel" string="To be installed" domain="[('state', '=', 'to install')]"/>
+                        <filter icon="STOCK_SORT_ASCENDING" string="To be upgraded" domain="[('state', '=', 'to upgrade')]"/>
                         <filter icon="terp-dialog-close" string="Not Installed" domain="[('state', 'in', ['uninstalled', 'uninstallable', 'to install'])]"/>
                         <separator orientation="vertical"/>
                         <field name="name"
@@ -58,6 +59,10 @@
                                     icon="STOCK_REMOVE" groups="base.group_no_one"
                                     domain="['!', ('category_id.parent_id','child_of','Hidden')]"/>
                         </field>
+                    </group>
+                    <newline/>
+                    <group expand="0" string="Group By">
+                        <filter string="state" icon="gtk-unindent" domain="[]" context="{'group_by':'git_current_branch'}"/>
                     </group>
                </search>
             </field>
@@ -194,6 +199,8 @@
                     <field name="installed_version"/>
                     <field name="latest_version"/>
                     <field name="state"/>
+                    <field name="git_current_branch"/>
+                    <field name="git_current_commit"/>
                     <button name="button_install" states="uninstalled" string="Install" icon="terp-gtk-jump-to-ltr" type="object"/>
                     <button name="button_install_cancel" states="to install" string="Cancel Install" icon="gtk-cancel"  type="object"/>
                     <button name="button_uninstall" states="installed" string="Uninstall (beta)" icon="terp-dialog-close" type="object"/>
@@ -207,8 +214,8 @@
             <field name="name">Modules</field>
             <field name="res_model">ir.module.module</field>
             <field name="view_type">form</field>
-            <field name="view_mode">kanban,tree,form</field>
-            <field name="context">{'search_default_app':1, 'search_default_no_hidden': 1}</field>
+            <field name="view_mode">tree,form,kanban</field>
+            <field name="context">{'search_default_app':0, 'search_default_no_hidden': 0}</field>
             <field name="search_view_id" ref="view_module_filter"/>
             <field name="help">You can install new modules in order to activate new features, menu, reports or data in your OpenERP instance. To install some modules, click on the button "Install" from the form view and then click on "Start Upgrade".</field>
         </record>

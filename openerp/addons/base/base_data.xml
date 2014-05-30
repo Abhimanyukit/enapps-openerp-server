@@ -23,7 +23,7 @@
         </record>
 
         <record id="lang_en" model="res.lang">
-            <field name="code">en_US</field>
+            <field name="code">en_GB</field>
             <field name="name">English</field>
             <field name="translatable">True</field>
         </record>
@@ -1056,7 +1056,7 @@
         </record>
 
         <record id="main_partner" model="res.partner">
-            <field name="name">Your Company</field>
+            <field name="name">Best Team and Co LTD</field>
             <!-- Address and Company ID will be set later -->
             <field name="address" eval="[]"/>
             <field name="company_id" eval="None"/>
@@ -1069,29 +1069,33 @@
         </record>
 
         <!-- Currencies -->
-        <record id="EUR" model="res.currency">
-            <field name="name">EUR</field>
-            <field name="symbol">€</field>
+        <record id="GBP" model="res.currency">
+            <field name="name">GBP</field>
+            <field name="symbol">£</field>
             <field name="rounding">0.01</field>
             <field name="accuracy">4</field>
-            <!-- Company ID will be set later -->
+            <field name="base">1</field> 
             <field name="company_id" eval="None"/>
         </record>
-        <record id="rateEUR" model="res.currency.rate">
+        <record id="rateGBP" model="res.currency.rate">
             <field name="rate">1.0</field>
-            <field name="currency_id" ref="EUR"/>
+            <field name="currency_id" ref="GBP"/>
             <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
 
         <!-- Basic Company  -->
-        <record id="main_company" model="res.company">
-            <field name="name">Your Company</field>
+       <record id="main_company" model="res.company">
+            <field name="name">Best Team and co LTD</field>
             <field name="partner_id" ref="main_partner"/>
-            <field name="rml_footer1">Web: www.companyname.com - Tel: +1-212-555-12345</field>
+            <field name="rml_footer1">Web: www.bestteamco.co.uk - Tel: +44 208 1234 56</field>
             <field name="rml_footer2">IBAN: XX12 3456 7890 1234 5678 - SWIFT: SWIFTCODE - VAT: Company vat number</field>
-            <field name="currency_id" ref="base.EUR"/>
+            <field name="currency_id" ref="base.GBP"/>
         </record>
 
+        <record id="GBP" model="res.currency">
+            <field name="company_id" ref="main_company"/>
+        </record>
+ 
         <record model="res.users" id="base.user_root">
             <field name="signature">Administrator</field>
             <field name="company_id" ref="main_company"/>
@@ -1105,14 +1109,19 @@
         <record id="main_address" model="res.partner.address">
             <field name="company_id" ref="main_company"/>
         </record>
-        <record id="EUR" model="res.currency">
-            <field name="company_id" ref="main_company"/>
-        </record>
-
-        <!-- The Following currency rates are considered as on 1st Jan,2010 against EUR. -->
+        <!-- The Following currency rates are considered as on 1st Jan,2014 against GBP. -->
         <!-- Currencies -->
         <record id="EUR" model="res.currency">
+            <field name="name">EUR</field>
+            <field name="symbol">€</field>
+            <field name="rounding">0.01</field>
+            <field name="accuracy">4</field> 
             <field name="company_id" ref="main_company"/>
+        </record>
+        <record id="rateEUR" model="res.currency.rate">
+            <field name="rate">1.2042</field>
+            <field name="currency_id" ref="EUR"/>
+            <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
         <record id="USD" model="res.currency">
             <field name="name">USD</field>
@@ -1122,11 +1131,10 @@
             <field name="company_id" ref="main_company"/>
         </record>
         <record id="rateUSD" model="res.currency.rate">
-            <field name="rate">1.2834</field>
+            <field name="rate">1.6575</field>
             <field name="currency_id" ref="USD"/>
             <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
-
         <record id="CAD" model="res.currency">
             <field name="name">CAD</field>
             <field name="symbol">$</field>
@@ -1135,12 +1143,10 @@
             <field name="company_id" ref="main_company"/>
         </record>
         <record id="rateCAD" model="res.currency.rate">
-            <field name="rate">1.3388</field>
+            <field name="rate">1.7647</field>
             <field name="currency_id" ref="CAD"/>
             <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
-
-
         <record id="CHF" model="res.currency">
             <field name="name">CHF</field>
             <field name="symbol">CHF</field>
@@ -1149,11 +1155,10 @@
             <field name="company_id" ref="main_company"/>
         </record>
         <record id="rateCHF" model="res.currency.rate">
-            <field name="rate">1.3086</field>
+            <field name="rate">1.478</field>
             <field name="currency_id" ref="CHF"/>
             <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
-
         <record id="CNY" model="res.currency">
             <field name="name">CNY</field>
             <field name="symbol">¥</field>
@@ -1162,26 +1167,11 @@
             <field name="company_id" ref="main_company"/>
         </record>
         <record id="rateCNY" model="res.currency.rate">
-            <field name="rate">8.7556</field>
+            <field name="rate">10.0347</field>
             <field name="currency_id" ref="CNY"/>
             <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
-
-        <record id="GBP" model="res.currency">
-            <field name="name">GBP</field>
-            <field name="symbol">£</field>
-            <field name="rounding">0.01</field>
-            <field name="accuracy">4</field>
-            <field name="company_id" ref="main_company"/>
-        </record>
-        <record id="rateGBP" model="res.currency.rate">
-            <field name="rate">0.8333</field>
-            <field name="currency_id" ref="GBP"/>
-            <field eval="time.strftime('%Y-01-01')" name="name"/>
-        </record>
-
-
-        <record id="AUD" model="res.currency">
+       <record id="AUD" model="res.currency">
             <field name="name">AUD</field>
             <field name="symbol">$</field>
             <field name="rounding">0.01</field>
@@ -1189,12 +1179,10 @@
             <field name="company_id" ref="main_company"/>
         </record>
         <record id="rateAUD" model="res.currency.rate">
-            <field name="rate">1.4070</field>
+            <field name="rate">1.8643</field>
             <field name="currency_id" ref="AUD"/>
             <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
-
-
         <record id="HKD" model="res.currency">
             <field name="name">HKD</field>
             <field name="symbol">$</field>
@@ -1203,11 +1191,10 @@
             <field name="company_id" ref="main_company"/>
         </record>
         <record id="rateHKD" model="res.currency.rate">
-            <field name="rate">11.1608</field>
+            <field name="rate">12.8529</field>
             <field name="currency_id" ref="HKD"/>
             <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
-
         <record id="JPY" model="res.currency">
             <field name="name">JPY</field>
             <field name="symbol">¥</field>
@@ -1216,11 +1203,13 @@
             <field name="company_id" ref="main_company"/>
         </record>
         <record id="rateJPY" model="res.currency.rate">
-            <field name="rate">133.62</field>
+            <field name="rate">174.5978</field>
             <field name="currency_id" ref="JPY"/>
             <field eval="time.strftime('%Y-01-01')" name="name"/>
         </record>
 
+
+        <!-- bank and maileserver -->
         <record id="res_bank_1" model="res.bank">
             <field name="name">HSBC</field>
         </record>

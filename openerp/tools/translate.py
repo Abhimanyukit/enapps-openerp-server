@@ -482,7 +482,7 @@ def trans_export(lang, modules, buffer, format, cr):
 
     newlang = not bool(lang)
     if newlang:
-        lang = 'en_US'
+        lang = 'en_GB'
     trans = trans_generate(lang, modules, cr)
     if newlang and format!='csv':
         for trx in trans:

@@ -41,6 +41,20 @@ from base64 import decodestring
 import cStringIO
 import PIL
 from PIL import Image
+import re
+try:
+    import cups
+except ImportError:
+    cups = None
+
+def get_printer_list():
+    if cups:
+        conn = cups.Connection()
+        printers = conn.getPrinters()
+        result = [(k, k) for k in printers.keys()]
+        return result
+    else:
+        return [('none', "Please install cups and python-cups packages")]
 
 
 _logger = logging.getLogger(__name__)
@@ -60,13 +74,13 @@ class groups(osv.osv):
         return res
 
     _columns = {
-        'name': fields.char('Name', size=64, required=True, translate=True),
+        'name': fields.char('Name', size=64, required=True, ),
         'users': fields.many2many('res.users', 'res_groups_users_rel', 'gid', 'uid', 'Users'),
         'model_access': fields.one2many('ir.model.access', 'group_id', 'Access Controls'),
         'rule_groups': fields.many2many('ir.rule', 'rule_group_rel',
             'group_id', 'rule_group_id', 'Rules', domain=[('global', '=', False)]),
         'menu_access': fields.many2many('ir.ui.menu', 'ir_ui_menu_group_rel', 'gid', 'menu_id', 'Access Menu'),
-        'comment' : fields.text('Comment', size=250, translate=True),
+        'comment' : fields.text('Comment', size=250, ),
         'category_id': fields.many2one('ir.module.category', 'Application', select=True),
         'full_name': fields.function(_get_full_name, type='char', string='Group Name'),
     }
@@ -273,6 +287,7 @@ class users(osv.osv):
         'menu_tips': fields.boolean('Menu Tips', help="Check out this box if you want to always display tips on each menu action"),
         'date': fields.datetime('Latest Connection', readonly=True),
         'avatar': fields.binary('Image', help='', readonly=False),
+        'printer': fields.selection(get_printer_list(), 'Default Printer', help='Default Printer'),
     }
 
     def on_change_company_id(self, cr, uid, ids, company_id):
@@ -363,7 +378,7 @@ class users(osv.osv):
 
     _defaults = {
         'password' : '',
-        'context_lang': 'en_US',
+        'context_lang': 'en_GB',
         'active' : True,
         'menu_id': _get_menu,
         'company_id': _get_company,
@@ -594,6 +609,36 @@ class users(osv.osv):
         if new_passwd:
             return self.write(cr, uid, uid, {'password': new_passwd})
         raise osv.except_osv(_('Warning!'), _("Setting empty passwords is not allowed for security reasons!"))
+
+    def search(self, cr, uid, args, offset=0, limit=None, order=None, context=None, count=False):
+        if not args:
+            args = []
+        args = self.replace_groups_search(cr, uid, args, context=context)
+        return super(users, self).search(cr, uid, args, offset=offset, limit=limit, order=order, context=context, count=count)
+
+    def replace_groups_search(self, cr, uid, args, context={}):
+        '''Fixing issue when "in_group_..." is passed as field name '''
+        args_type = type(args)
+        if args and args_type in (list, tuple, ):
+            args_new = list(args) if args_type == tuple else args
+            for numb, args_item in enumerate(args_new):
+                if args_item and isinstance(args_item, (list, tuple)):
+                    args_new[numb] = self.replace_groups_search(cr, uid, args_item, context=context)
+
+            if len(args) == 3 and isinstance(args[0], (str, unicode)) and args[1] in ('is','=','is not','!='):
+                if re.match(r'^in_group_[0-9]*$',args[0]):
+                    group_id = int(args[0].split('_')[2])
+                    operator = args[1]
+                    operator = '=' if args[1] == 'is' else operator
+                    operator = '!=' if args[1] == 'is not' else operator
+                    cr.execute('''SELECT uid
+                                  FROM res_groups_users_rel
+                                  WHERE gid %s %s'''% (operator, group_id, ))
+                    users_ids = [item[0] for item in cr.fetchall()]
+                    users_ids = users_ids or [0]
+                    args_new=['id','in',users_ids]
+            args = tuple(args_new) if args_type == tuple else args_new
+        return args
 
 users()
 

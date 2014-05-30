@@ -35,6 +35,7 @@ from opcode import HAVE_ARGUMENT, opmap, opname
 from types import CodeType
 import logging
 import os
+_logger = logging.getLogger(__name__)
 
 __all__ = ['test_expr', 'safe_eval', 'const_eval']
 
@@ -238,6 +239,9 @@ def safe_eval(expr, globals_dict=None, locals_dict=None, mode="eval", nocopy=Fal
                 'set' : set
             }
     )
-    return eval(test_expr(expr,_SAFE_OPCODES, mode=mode), globals_dict, locals_dict)
+    try:
+        return eval(test_expr(expr,_SAFE_OPCODES, mode=mode), globals_dict, locals_dict)
+    except NameError, e:
+        _logger.warning(e)
 
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

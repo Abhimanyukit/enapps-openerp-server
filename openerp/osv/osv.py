@@ -165,8 +165,8 @@ class object_proxy(object):
             raise except_osv('Object Error', 'Object %s doesn\'t exist' % str(obj))
         return getattr(object, method)(cr, uid, *args, **kw)
 
-    def execute_kw(self, db, uid, obj, method, args, kw=None):
-        return self.execute(db, uid, obj, method, *args, **kw or {})
+    def execute_kw(self, db, uid, obj, method, *args, **kw):
+        return self.execute(db, uid, obj, method, *args, **kw)
 
     @check
     def execute(self, db, uid, obj_name, method, *args, **kw):

@@ -85,41 +85,6 @@ def check_grunt():
     except:
         return False
 
-def run_grunt():
-    if not check_grunt():
-        return False
-    config = openerp.tools.config
-    addon_dirs = config.options.get('addons_path').split(",")
-    web_path = ''
-    for addon_dir in addon_dirs:
-        if 'web' in os.listdir(addon_dir):
-            web_path = os.path.join(addon_dir, 'web')
-    if web_path:
-        os.chdir(web_path)
-        content=''
-        if os.path.exists('static/build/css') and os.path.exists('static/build/css/theme.txt'):
-            theme_log = open('static/build/css/theme.txt', 'r')
-            content = theme_log.read()
-            theme_log.close()
-            print "Using theme %s" % content
-            if content and os.path.exists('static/build/css/style.css'):
-                css_ctime = os.path.getctime('static/build/css/style.css')
-                style_path = os.path.join('static/themes/',content)
-                style_ctime = 0
-                if os.path.exists(style_path):
-                    theme_files = []
-                    for root, dirs, files in os.walk(style_path):
-                        for filename in files:
-                            theme_files.append(os.path.join(root,filename))
-                    style_ctime = max(map(lambda x: os.path.getctime(x), theme_files))
-                else:
-                    return False
-                if style_ctime < css_ctime:
-                    return False
-        os.chdir('../..')
-        subprocess.call(['grunt','--theme=' + (content or 'v6')])
-    return True
-
 def setup_pid_file():
     """ Create a file with the process id written in it.
 
@@ -261,6 +226,8 @@ def compress_js(js_list):
     for f in js_list:
         with open(f,'r') as js_file:
             js_total+=js_file.read()
+    if not os.path.isdir('static/build'):
+        os.mkdir('static/build')
     minified_path = 'static/build/web_minified.js'
     if os.path.exists(minified_path) and os.path.getmtime(minified_path) > max(map(lambda x: os.path.getctime(x), js_list)):
         logging.info('Current webclient\'s compressed version is the latest')
@@ -301,12 +268,10 @@ if __name__ == "__main__":
     report_configuration()
 
     config = openerp.tools.config
-
     configure_babel_localedata_path()
 
     setup_signal_handlers()
 
-    run_grunt()
     run_compression(config['addons_path'])
 
     if config["test_file"]:

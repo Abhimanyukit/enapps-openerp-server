@@ -32,6 +32,7 @@
         * size
 """
 
+import os
 import base64
 import datetime as DT
 import logging
@@ -78,7 +79,9 @@ class _column(object):
     # used to hide a certain field type in the list of field types
     _deprecated = False
 
-    def __init__(self, string='unknown', required=False, readonly=False, domain=None, context=None, states=None, priority=0, change_default=False, size=None, ondelete=None, translate=False, select=False, manual=False, **args):
+    def __init__(self, string='unknown', required=False, readonly=False, domain=None,
+                context=None, states=None, priority=0, change_default=False, size=None,
+                ondelete=None, translate=False, select=False, manual=False, name_search_operator=None, **args):
         """
 
         The 'manual' keyword argument specifies if the field is a custom one.
@@ -108,6 +111,7 @@ class _column(object):
         self.select = select
         self.manual = manual
         self.selectable = True
+        self.name_search_operator = name_search_operator
         self.group_operator = args.get('group_operator', False)
         for a in args:
             if args[a]:
@@ -380,9 +384,11 @@ class binary(_column):
     _classic_read = False
     _prefetch = False
 
-    def __init__(self, string='unknown', filters=None, **args):
-        _column.__init__(self, string=string, **args)
+    def __init__(self, string='unknown', filters=None, uploadfolder=False, image_size='256x256>', **args):
+        _column.__init__(self, string=string, uploadfolder=uploadfolder, **args)
         self.filters = filters
+        self.uploadfolder = uploadfolder  # List of objects fields, each item is representing folder file will be stored in
+        self.image_size = image_size
 
     def get(self, cr, obj, ids, name, user=None, context=None, values=None):
         if not context:
@@ -397,11 +403,12 @@ class binary(_column):
             # content if it's needed at some point.
             # TODO: after 6.0 we should consider returning a dict with size and content instead of
             #       having an implicit convention for the value
-            if val and context.get('bin_size_%s' % name, context.get('bin_size')):
+            if val and context.get('bin_size_%s' % name, context.get('bin_size')) and not self.uploadfolder:
                 res[i] = tools.human_size(long(val))
             else:
                 res[i] = val
         return res
+
 
 class selection(_column):
     _type = 'selection'
@@ -531,21 +538,18 @@ class one2many(_column):
                 res[r[self._fields_id]].append(r['id'])
         return res
 
-    def set(self, cr, obj, id, field, values, user=None, context=None):
+    @classmethod
+    def set(self, cr, obj, id, field, values, user=None, context={}):
+        field_obj = obj._columns[field]
         result = []
-        if not context:
-            context = {}
-        if self._context:
-            context = context.copy()
-        context.update(self._context)
         context['no_store_function'] = True
         if not values:
             return
-        _table = obj.pool.get(self._obj)._table
-        obj = obj.pool.get(self._obj)
+        _table = obj.pool.get(field_obj._obj)._table
+        obj = obj.pool.get(field_obj._obj)
         for act in values:
             if act[0] == 0:
-                act[2][self._fields_id] = id
+                act[2][field_obj._fields_id] = id
                 id_new = obj.create(cr, user, act[2], context=context)
                 result += obj._store_get_values(cr, user, [id_new], act[2].keys(), context)
             elif act[0] == 1:
@@ -553,38 +557,38 @@ class one2many(_column):
             elif act[0] == 2:
                 obj.unlink(cr, user, [act[1]], context=context)
             elif act[0] == 3:
-                reverse_rel = obj._all_columns.get(self._fields_id)
+                reverse_rel = obj._all_columns.get(field_obj._fields_id)
                 assert reverse_rel, 'Trying to unlink the content of a o2m but the pointed model does not have a m2o'
                 # if the model has on delete cascade, just delete the row
                 if reverse_rel.column.ondelete == "cascade":
                     obj.unlink(cr, user, [act[1]], context=context)
                 else:
-                    cr.execute('update '+_table+' set '+self._fields_id+'=null where id=%s', (act[1],))
-            elif act[0] == 4:
+                    cr.execute('update '+_table+' set '+field_obj._fields_id+'=null where id=%s', (act[1],))
+            elif act[0] == 4 and hasattr(field_obj, '_fields_id'):
                 # Must use write() to recompute parent_store structure if needed
-                obj.write(cr, user, [act[1]], {self._fields_id:id}, context=context or {})
-                
+                obj.write(cr, user, [act[1]], {field_obj._fields_id:id}, context=context or {})
+
             elif act[0] == 5:
-                reverse_rel = obj._all_columns.get(self._fields_id)
+                reverse_rel = obj._all_columns.get(field_obj._fields_id)
                 assert reverse_rel, 'Trying to unlink the content of a o2m but the pointed model does not have a m2o'
                 # if the o2m has a static domain we must respect it when unlinking
-                extra_domain = self._domain if isinstance(getattr(self, '_domain', None), list) else []
-                ids_to_unlink = obj.search(cr, user, [(self._fields_id,'=',id)] + extra_domain, context=context)
+                extra_domain = field_obj._domain if isinstance(getattr(field_obj, '_domain', None), list) else []
+                ids_to_unlink = obj.search(cr, user, [(field_obj._fields_id,'=',id)] + extra_domain, context=context)
                 # If the model has cascade deletion, we delete the rows because it is the intended behavior,
                 # otherwise we only nullify the reverse foreign key column.
                 if reverse_rel.column.ondelete == "cascade":
                     obj.unlink(cr, user, ids_to_unlink, context=context)
                 else:
-                    obj.write(cr, user, ids_to_unlink, {self._fields_id: False}, context=context)
+                    obj.write(cr, user, ids_to_unlink, {field_obj._fields_id: False}, context=context)
             elif act[0] == 6:
                 # Must use write() to recompute parent_store structure if needed
-                obj.write(cr, user, act[2], {self._fields_id:id}, context=context or {})
+                obj.write(cr, user, act[2], {field_obj._fields_id:id}, context=context or {})
                 ids2 = act[2] or [0]
-                cr.execute('select id from '+_table+' where '+self._fields_id+'=%s and id <> ALL (%s)', (id,ids2))
+                cr.execute('select id from '+_table+' where '+field_obj._fields_id+'=%s and id <> ALL (%s)', (id,ids2))
                 ids3 = map(lambda x:x[0], cr.fetchall())
-                obj.write(cr, user, ids3, {self._fields_id:False}, context=context or {})
+                obj.write(cr, user, ids3, {field_obj._fields_id:False}, context=context or {})
             elif act[0] == 7:
-                obj.order(cr, user, act[1], self._fields_id, id, context=context)
+                obj.order(cr, user, act[1], field_obj._fields_id, id, context=context)
         return result
 
     def search(self, cr, obj, args, name, value, offset=0, limit=None, uid=None, operator='like', context=None):
@@ -1123,6 +1127,8 @@ class function(_column):
             context = {}
         if self._fnct_inv:
             self._fnct_inv(obj, cr, user, id, name, value, self._fnct_inv_arg, context)
+        elif self._type == "one2many":
+            globals()[self._type].set(cr, obj, id, name, value, user=user, context=context)
 
 # ---------------------------------------------------------
 # Related fields
@@ -1515,7 +1521,6 @@ def field_to_dict(model, cr, user, field, context=None):
     the translation).
 
     """
-
     res = {'type': field._type}
     # This additional attributes for M2M and function field is added
     # because we need to display tooltip with this additional information
@@ -1534,7 +1539,7 @@ def field_to_dict(model, cr, user, field, context=None):
         res['related_columns'] = [col1, col2]
         res['third_table'] = table
     for arg in ('string', 'readonly', 'states', 'size', 'required', 'group_operator',
-            'change_default', 'translate', 'help', 'select', 'selectable'):
+            'change_default', 'translate', 'help', 'select', 'selectable', 'name_search_operator'):
         if getattr(field, arg):
             res[arg] = getattr(field, arg)
     for arg in ('digits', 'invisible', 'filters'):

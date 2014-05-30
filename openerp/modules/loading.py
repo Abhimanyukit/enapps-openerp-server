@@ -38,6 +38,10 @@ import zipimport
 from cStringIO import StringIO
 from os.path import join as opj
 from zipfile import PyZipFile, ZIP_DEFLATED
+try:
+    import git
+except ImportError:
+    git = False
 
 
 import openerp
@@ -60,6 +64,8 @@ from openerp.modules.module import \
     get_module_resource, zip_directory, \
     get_module_path, initialize_sys_path, \
     load_openerp_module, init_module_models
+
+from collections import OrderedDict
 
 _logger = logging.getLogger(__name__)
 
@@ -178,7 +184,10 @@ def load_module_graph(cr, graph, status=None, perform_checks=True, skip_modules=
     dt_before_load = cr.fetchone()[0]
 
     # register, instantiate and initialize models for each modules
+    pkgs_data = []
+    inits_data = {}
     for index, package in enumerate(graph):
+        pkg_data = False
         module_name = package.name
         module_id = package.id
 
@@ -193,6 +202,8 @@ def load_module_graph(cr, graph, status=None, perform_checks=True, skip_modules=
         loaded_modules.append(package.name)
         if hasattr(package, 'init') or hasattr(package, 'update') or package.state in ('to install', 'to upgrade'):
             init_module_models(cr, package.name, models)
+            if git:
+                update_git_information(cr, package.name)
 
         status['progress'] = float(index) / len(graph)
 
@@ -210,6 +221,7 @@ def load_module_graph(cr, graph, status=None, perform_checks=True, skip_modules=
             mode = 'init'
 
         if hasattr(package, 'init') or hasattr(package, 'update') or package.state in ('to install', 'to upgrade'):
+            pkg_data = [package, models, ]
             if package.state=='to upgrade':
                 # upgrading the module information
                 modobj.write(cr, 1, [module_id], modobj.get_values_from_terp(package.data))
@@ -242,7 +254,22 @@ def load_module_graph(cr, graph, status=None, perform_checks=True, skip_modules=
             for kind in ('init', 'demo', 'update'):
                 if hasattr(package, kind):
                     delattr(package, kind)
+            # get unique inits; each one would have 1 module as value
+            # this is to avoid situation: run init from first module(old init) and then run inherited init
+            for obj in models:
+                if hasattr(obj, 'init'):
+                    inits_data.update({obj._name: package.name})
 
+        cr.commit()
+        if pkg_data:
+            pkgs_data.append(pkg_data)
+    inits_unique = OrderedDict({})
+    for package, models in pkgs_data:
+        for obj in models:
+            if hasattr(obj, 'init'):
+                inits_unique.update({obj._name: obj})
+    for key, obj in inits_unique.items():
+        obj.init(cr)
         cr.commit()
 
     # mark new res_log records as read
@@ -251,6 +278,30 @@ def load_module_graph(cr, graph, status=None, perform_checks=True, skip_modules=
     cr.commit()
 
     return loaded_modules, processed_modules
+
+def update_git_information(cr, module_name):
+    pool = pooler.get_pool(cr.dbname)
+    module_pool = pool.get('ir.module.module')
+    module_path = get_module_path(module_name)
+    try:
+        repo = git.Repo(module_path)
+        try:
+            active_branch = repo.active_branch.name
+        except TypeError, e:
+            if 'HEAD is a detached symbolic reference' in str(e):
+                active_branch = repo.head.commit.hexsha
+            else:
+                raise e
+        commit_hash = repo.commit().hexsha
+        git_repository_name = os.path.split(repo.working_dir)[-1]
+        module_ids = module_pool.search(cr, 1, [('name', '=', module_name)])
+        module_pool.write(cr, 1, module_ids, {
+            'git_current_branch': active_branch,
+            'git_current_commit': commit_hash,
+            'git_repository_name': git_repository_name,
+        })
+    except git.InvalidGitRepositoryError:
+        _logger.warning("Module %s is not under git control" % module_name)
 
 def _check_module_names(cr, module_names):
     mod_names = set(module_names)

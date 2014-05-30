@@ -92,7 +92,7 @@ class ir_model(osv.osv):
         return res
 
     _columns = {
-        'name': fields.char('Model Description', size=64, translate=True, required=True),
+        'name': fields.char('Model Description', size=64, required=True),
         'model': fields.char('Model', size=64, required=True, select=1),
         'info': fields.text('Information'),
         'field_id': fields.one2many('ir.model.fields', 'model_id', 'Fields', required=True),

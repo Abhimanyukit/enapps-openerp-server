@@ -53,7 +53,7 @@ sock3 = xmlrpclib.ServerProxy(url+'/common')
 sock4 = xmlrpclib.ServerProxy(url+'/wizard')
 demos =  [True]
 
-langs = lang or (map(lambda x: x[0], sock2.list_lang()) + ['en_US'])
+langs = lang or (map(lambda x: x[0], sock2.list_lang()) + ['en_GB'])
 
 def wait(id):
     progress=0.0

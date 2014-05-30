@@ -110,9 +110,10 @@ class report_xml(osv.osv):
     _sequence = 'ir_actions_id_seq'
     _order = 'name'
     _columns = {
-        'name': fields.char('Name', size=64, required=True, translate=True),
+        'name': fields.char('Name', size=64, required=True, ),
         'model': fields.char('Object', size=64, required=True),
         'type': fields.char('Action Type', size=32, required=True),
+        'invisible': fields.boolean('Invisible', help="Determines if report action will be invisible"),
         'report_name': fields.char('Service Name', size=64, required=True),
         'usage': fields.char('Action Usage', size=32),
         'report_type': fields.char('Report Type', size=32, required=True, help="Report Type, e.g. pdf, html, raw, sxw, odt, html2html, mako2html, ..."),
@@ -123,6 +124,7 @@ class report_xml(osv.osv):
         'auto': fields.boolean('Custom python parser'),
 
         'header': fields.boolean('Add RML header', help="Add or not the corporate RML header"),
+        'direct_print': fields.selection([('print', 'Print'), ('print_and_show', 'Print and show')], 'Direct print on user defined printer', ),
 
         'report_xsl': fields.char('XSL path', size=256),
         'report_xml': fields.char('XML path', size=256, help=''),
@@ -208,7 +210,7 @@ class act_window(osv.osv):
                 return s.encode('utf8')
             return s
         for act in self.browse(cr, uid, ids, context=context):
-            context.update(eval(act.context, context))
+            context.update(eval(act.context, context) or {})
             fields_from_fields_get = self.pool.get(act.res_model).fields_get(cr, uid, context=context)
             search_view_id = False
             if act.search_view_id:
@@ -240,7 +242,7 @@ class act_window(osv.osv):
                         elif child.localName in ('page','group','notebook'):
                             process_child(child, new_node, doc)
 
-                form_arch = self.pool.get(act.res_model).fields_view_get(cr, uid, False, 'form', context)
+                form_arch = self.pool.get(act.res_model).fields_view_get(cr, uid, view_id=None, view_type='form', context=context, toolbar=False)
                 dom_arc = dom.minidom.parseString(encode(form_arch['arch']))
                 new_node = copy.deepcopy(dom_arc)
                 for child_node in new_node.childNodes[0].childNodes:
@@ -258,12 +260,12 @@ class act_window(osv.osv):
         return dict([(id, activate_tips) for id in ids])
 
     _columns = {
-        'name': fields.char('Action Name', size=64, translate=True),
+        'name': fields.char('Action Name', size=64, ),
         'type': fields.char('Action Type', size=32, required=True),
         'view_id': fields.many2one('ir.ui.view', 'View Ref.', ondelete='cascade'),
         'domain': fields.char('Domain Value', size=250,
             help="Optional domain filtering of the destination data, as a Python expression"),
-        'context': fields.char('Context Value', size=250, required=True,
+        'context': fields.char('Context Value', size=1024, required=True,
             help="Context dictionary as Python expression, empty by default (Default: {})"),
         'res_model': fields.char('Object', size=64, required=True,
             help="Model name of the object to open in the view window"),
@@ -292,11 +294,14 @@ class act_window(osv.osv):
         'search_view' : fields.function(_search_view, type='text', string='Search View'),
         'help': fields.text('Action description',
             help='Optional help text for the users with a description of the target view, such as its usage and purpose.',
-            translate=True),
+            ),
         'display_menu_tip':fields.function(_get_help_status, type='boolean', string='Display Menu Tips',
             help='It gives the status if the tip has to be displayed or not when a user executes an action'),
         'multi': fields.boolean('Action on Multiple Doc.', help="If set to true, the action will not be displayed on the right toolbar of a form view"),
         'context_menu': fields.boolean('Show in right-click context menu', help="If set to true, this action will appear as an option in the right-click context menu."),
+        'invisible_report_ids': fields.many2many('ir.actions.report.xml', 'ir_act_window_report_rel', 'action_id', 'report_id', 'Invisible reports', help='Will hide defined right-hand side report actions against current one.'),
+        'invisible_action_ids': fields.many2many('ir.actions.act_window', 'ir_act_window_act_window_rel', 'action_id', 'related_action_id', 'Invisible Actions', help='Will hide defined right-hand side Actions against current one.'),
+        'invisible_link_ids': fields.many2many('ir.actions.act_window', 'ir_act_window_act_link_rel', 'action_id', 'related_link_id', 'Invisible Links', help='Will hide defined right-hand side Links against current one.'),
     }
 
     _defaults = {
@@ -363,7 +368,7 @@ class act_wizard(osv.osv):
     _sequence = 'ir_actions_id_seq'
     _order = 'name'
     _columns = {
-        'name': fields.char('Wizard Info', size=64, required=True, translate=True),
+        'name': fields.char('Wizard Info', size=64, required=True, ),
         'type': fields.char('Action Type', size=32, required=True),
         'wiz_name': fields.char('Wizard Name', size=64, required=True),
         'multi': fields.boolean('Action on Multiple Doc.', help="If set to true, the wizard will not be displayed on the right toolbar of a form view."),
@@ -382,7 +387,7 @@ class act_url(osv.osv):
     _sequence = 'ir_actions_id_seq'
     _order = 'name'
     _columns = {
-        'name': fields.char('Action Name', size=64, translate=True),
+        'name': fields.char('Action Name', size=64, ),
         'type': fields.char('Action Type', size=32, required=True),
         'url': fields.text('Action URL',required=True),
         'target': fields.selection((
@@ -483,7 +488,7 @@ class actions_server(osv.osv):
     _sequence = 'ir_actions_id_seq'
     _order = 'sequence,name'
     _columns = {
-        'name': fields.char('Action Name', required=True, size=64, translate=True),
+        'name': fields.char('Action Name', required=True, size=64, ),
         'condition' : fields.char('Condition', size=256, required=True,
                                   help="Condition that is tested before the action is executed, "
                                        "and prevent execution if it is not verified.\n"
@@ -519,12 +524,12 @@ class actions_server(osv.osv):
         'trigger_obj_id': fields.many2one('ir.model.fields','Relation Field', help="The field on the current object that links to the target object record (must be a many2one, or an integer field with the record ID)"),
         'email': fields.char('Email Address', size=512, help="Expression that returns the email address to send to. Can be based on the same values as for the condition field.\n"
                                                              "Example: object.invoice_address_id.email, or 'me@example.com'"),
-        'subject': fields.char('Subject', size=1024, translate=True, help="Email subject, may contain expressions enclosed in double brackets based on the same values as those "
+        'subject': fields.char('Subject', size=1024, help="Email subject, may contain expressions enclosed in double brackets based on the same values as those "
                                                                           "available in the condition field, e.g. `Hello [[ object.partner_id.name ]]`"),
-        'message': fields.text('Message', translate=True, help="Email contents, may contain expressions enclosed in double brackets based on the same values as those "
+        'message': fields.text('Message', help="Email contents, may contain expressions enclosed in double brackets based on the same values as those "
                                                                           "available in the condition field, e.g. `Dear [[ object.partner_id.name ]]`"),
         'mobile': fields.char('Mobile No', size=512, help="Provides fields that be used to fetch the mobile number, e.g. you select the invoice, then `object.invoice_address_id.mobile` is the field which gives the correct mobile number"),
-        'sms': fields.char('SMS', size=160, translate=True),
+        'sms': fields.char('SMS', size=160, ),
         'child_ids': fields.many2many('ir.actions.server', 'rel_server_actions', 'server_id', 'action_id', 'Other Actions'),
         'usage': fields.char('Action Usage', size=32),
         'type': fields.char('Action Type', size=32, required=True),
@@ -806,7 +811,7 @@ class ir_actions_todo_category(osv.osv):
     _name = 'ir.actions.todo.category'
     _description = "Configuration Wizard Category"
     _columns = {
-         'name':fields.char('Name', size=64, translate=True, required=True),
+         'name':fields.char('Name', size=64, required=True),
          'sequence': fields.integer('Sequence'),
          'wizards_ids': fields.one2many('ir.actions.todo', 'category_id', 'Configuration Wizards'),
     }
@@ -835,7 +840,7 @@ class ir_actions_todo(osv.osv):
 Automatic: Runs whenever the system is reconfigured.
 Launch Manually Once: after hacing been launched manually, it sets automatically to Done."""),
         'groups_id': fields.many2many('res.groups', 'res_groups_action_rel', 'uid', 'gid', 'Groups'),
-        'note': fields.text('Text', translate=True),
+        'note': fields.text('Text', ),
         'category_id': fields.many2one('ir.actions.todo.category','Category'),
     }
     _defaults={

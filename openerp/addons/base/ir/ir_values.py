@@ -26,7 +26,8 @@ from tools.translate import _
 
 EXCLUDED_FIELDS = set((
     'report_sxw_content', 'report_rml_content', 'report_sxw', 'report_rml',
-    'report_sxw_content_data', 'report_rml_content_data', 'search_view', ))
+    'report_sxw_content_data', 'report_rml_content_data', 'search_view',
+    'pentaho_file', ))
 
 #: Possible slots to bind an action to with :meth:`~.set_action`
 ACTION_SLOTS = [
@@ -381,7 +382,7 @@ class ir_values(osv.osv):
         for action in cr.dictfetchall():
             if not action['value']:
                 continue    # skip if undefined
-            action_model,id = action['value'].split(',')
+            action_model, id = action['value'].split(',')
             fields = [
                     field
                     for field in self.pool.get(action_model)._all_columns
@@ -389,7 +390,7 @@ class ir_values(osv.osv):
             # FIXME: needs cleanup
             try:
                 action_def = self.pool.get(action_model).read(cr, uid, int(id), fields, context)
-                if action_def:
+                if action_def and not action_def.get('invisible'):
                     if action_model in ('ir.actions.report.xml','ir.actions.act_window',
                                         'ir.actions.wizard'):
                         groups = action_def.get('groups_id')
@@ -401,8 +402,8 @@ class ir_values(osv.osv):
                                     raise osv.except_osv('Error !',
                                                          'You do not have the permission to perform this operation !!!')
                                 continue
-                # keep only the first action registered for each action name
-                results[action['name']] = (action['id'], action['name'], action_def)
+                    # keep only the first action registered for each action name
+                    results[action['name']] = (action['id'], action['name'], action_def)
             except except_orm, e:
                 continue
         return sorted(results.values())

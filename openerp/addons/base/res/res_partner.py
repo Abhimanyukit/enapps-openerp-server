@@ -45,7 +45,7 @@ class res_partner_category(osv.osv):
                              used to select the short version of the
                              category name (without the direct parent),
                              when set to ``'short'``. The default is
-                             the long version.""" 
+                             the long version."""
         if context is None:
             context = {}
         if context.get('partner_category_display') == 'short':
@@ -80,7 +80,7 @@ class res_partner_category(osv.osv):
     _description='Partner Categories'
     _name = 'res.partner.category'
     _columns = {
-        'name': fields.char('Category Name', required=True, size=64, translate=True),
+        'name': fields.char('Category Name', required=True, size=64, ),
         'parent_id': fields.many2one('res.partner.category', 'Parent Category', select=True, ondelete='cascade'),
         'complete_name': fields.function(_name_get_fnc, type="char", string='Full Name'),
         'child_ids': fields.one2many('res.partner.category', 'parent_id', 'Child Categories'),
@@ -103,8 +103,8 @@ res_partner_category()
 class res_partner_title(osv.osv):
     _name = 'res.partner.title'
     _columns = {
-        'name': fields.char('Title', required=True, size=46, translate=True),
-        'shortcut': fields.char('Shortcut', required=True, size=16, translate=True),
+        'name': fields.char('Title', required=True, size=46, ),
+        'shortcut': fields.char('Shortcut', required=True, size=16, ),
         'domain': fields.selection([('partner','Partner'),('contact','Contact')], 'Domain', required=True, size=24)
     }
     _order = 'name'
@@ -286,7 +286,6 @@ class res_partner(osv.osv):
             rec_name = 'ref'
         else:
             rec_name = 'name'
-
         res = [(r['id'], r[rec_name]) for r in self.read(cr, uid, ids, [rec_name], context)]
         return res
 
@@ -343,7 +342,6 @@ class res_partner(osv.osv):
     def gen_next_ref(self, cr, uid, ids):
         if len(ids) != 1:
             return True
-
         # compute the next number ref
         cr.execute("select ref from res_partner where ref is not null order by char_length(ref) desc, ref desc limit 1")
         res = cr.dictfetchall()
@@ -352,18 +350,24 @@ class res_partner(osv.osv):
             nextref = int(ref)+1
         except:
             raise osv.except_osv(_('Warning'), _("Couldn't generate the next id because some partners have an alphabetic id !"))
-
         # update the current partner
         cr.execute("update res_partner set ref=%s where id=%s", (nextref, ids[0]))
         return True
 
     def view_header_get(self, cr, uid, view_id, view_type, context):
-        res = super(res_partner, self).view_header_get(cr, uid, view_id, view_type, context)
-        if res: return res
-        if (not context.get('category_id') or not
-                isinstance(context['category_id'], (int, long))):
+        """small extra check in the custom view_header_get method on res.partner,
+        that prevents a exception when one creates a client_action_relate
+        on res.parter with src_model also set to res.partner."""
+        try:
+          res = super(res_partner, self).view_header_get(cr, uid, view_id, view_type, context)
+          if res: return res
+        except TypeError:
+            pass
+        if (not (context.get('category_id') and
+                 isinstance(context['category_id'], (int, long)))):
             return False
         return _('Partners: ')+self.pool.get('res.partner.category').browse(cr, uid, context['category_id'], context).name
+
     def main_partner(self, cr, uid):
         ''' Return the id of the main partner
         '''
@@ -373,6 +377,7 @@ class res_partner(osv.osv):
             model_data.search(cr, uid, [('module','=','base'),
                                         ('name','=','main_partner')])[0],
             ).res_id
+
 res_partner()
 
 class res_partner_address(osv.osv):
@@ -416,20 +421,22 @@ class res_partner_address(osv.osv):
         if not len(ids):
             return []
         res = []
+        contact_display = context.get('contact_display', 'contact')
         for r in self.read(cr, user, ids, fields_to_read):
-            if context.get('contact_display', 'contact')=='partner' and r['partner_id']:
+            if contact_display == 'partner' and r['partner_id']:
                 res.append((r['id'], r['partner_id'][1]))
             else:
                 # make a comma-separated list with the following non-empty elements
                 elems = []
                 for field_name in fields_to_read:
                     #get field name for many2one and char,etc.. fields
-                    if (r[field_name] and type(r[field_name]) in (list, tuple) and len(r[field_name]) > 1):
-                        elems.append(r[field_name][1])
-                    else:
-                        elems.append(r[field_name])
+                    if not ((contact_display == 'partner_address') and field_name == 'partner_id'):
+                        if (r[field_name] and type(r[field_name]) in (list, tuple) and len(r[field_name]) > 1):
+                            elems.append(r[field_name][1])
+                        else:
+                            elems.append(r[field_name])
                 addr = ', '.join(filter(bool, elems))
-                if (context.get('contact_display', 'contact')=='partner_address') and r['partner_id']:
+                if (contact_display == 'partner_address') and r['partner_id']:
                     res.append((r['id'], "%s: %s" % (r['partner_id'][1], addr or '/')))
                 else:
                     res.append((r['id'], addr or '/'))
@@ -486,7 +493,7 @@ class res_partner_address(osv.osv):
         '''
         # get the address format
         address_format = address.country_id and address.country_id.address_format or \
-                                         '%(street)s\n%(street2)s\n%(city)s,%(state_code)s %(zip)s' 
+                                         '%(street)s\n%(street2)s\n%(city)s,%(state_code)s %(zip)s'
         # get the information that will be injected into the display format
         args = {
             'state_code': address.state_id and address.state_id.code or '',

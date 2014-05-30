@@ -495,6 +495,8 @@
                                 <separator string="Miscellaneous" colspan="2"/>
                                 <field name="multi"/>
                                 <field name="auto"/>
+                                <field name="invisible"/>
+                                <field name="direct_print"/>
                             </group>
                         </page>
                         <page string="Security">
@@ -622,6 +624,14 @@
                         <page string="Security">
                             <separator colspan="4" string="Select Groups" />
                             <field name="groups_id" nolabel="1" colspan="4" />
+                        </page>
+                        <page string="Visibility">
+                            <separator colspan="4" string="Invisible actions" />
+                            <field name="invisible_action_ids" nolabel="1" colspan="4" domain="['|', ('res_model', '=', res_model), ('src_model', '=', res_model)]"/>
+                            <separator colspan="4" string="Invisible links" />
+                            <field name="invisible_link_ids" nolabel="1" colspan="4" domain="['|', ('res_model', '=', res_model), ('src_model', '=', res_model)]"/>
+                            <separator colspan="4" string="Invisible reports" />
+                            <field name="invisible_report_ids" nolabel="1" colspan="4" domain="[('model', '=', res_model)]"/>
                         </page>
                     </notebook>
                 </form>
@@ -1817,7 +1827,7 @@
                         <page string="Trigger" attrs="{'invisible':[('state','!=','trigger')]}">
                             <separator colspan="4" string="Trigger Configuration"/>
                             <field name="wkf_model_id" attrs="{'required':[('state','=','trigger')]}"/>
-                            <field name="trigger_obj_id" context="{'key':''}" 
+                            <field name="trigger_obj_id" context="{'key':''}"
                                    domain="[('model_id','=',model_id),('ttype','in',['many2one','int'])]"
                                    attrs="{'required':[('state','=','trigger')]}"/>
                             <field name="trigger_name" attrs="{'required':[('state','=','trigger')]}"/>
@@ -2013,7 +2023,7 @@
             <field name="function">power_on</field>
             <field name="args">()</field>
         </record>
-        
+
         <record id="ir_actions_todo_category_form" model="ir.ui.view">
             <field name="name">ir.actions.todo.category.form</field>
             <field name="model">ir.actions.todo.category</field>
@@ -2026,7 +2036,7 @@
                 </form>
             </field>
         </record>
-        
+
         <record id="ir_actions_todo_category_tree" model="ir.ui.view">
             <field name="name">ir.actions.todo.category.tree</field>
             <field name="model">ir.actions.todo.category</field>
@@ -2042,12 +2052,12 @@
         <record id="category_sales_management_config" model="ir.actions.todo.category">
             <field name="name">Sales Management</field>
             <field name="sequence">5</field>
-        </record>         
+        </record>
 
         <record id="category_tools_customization_config" model="ir.actions.todo.category">
             <field name="name">Tools / Customization</field>
             <field name="sequence">5</field>
-        </record>         
+        </record>
 
         <!-- ir.mail.server -->
         <record model="ir.ui.view" id="ir_mail_server_form">

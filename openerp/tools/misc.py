@@ -936,7 +936,7 @@ DEFAULT_SERVER_DATETIME_FORMAT = "%s %s" % (
 # with a C standard implementation.
 DATETIME_FORMATS_MAP = {
         '%C': '', # century
-        '%D': '%m/%d/%Y', # modified %y->%Y
+        '%D': '%d/%m/%Y', # modified %y->%Y
         '%e': '%d',
         '%E': '', # special modifier
         '%F': '%Y-%m-%d',

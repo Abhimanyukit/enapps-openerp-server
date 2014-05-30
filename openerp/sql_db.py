@@ -46,8 +46,8 @@ from threading import currentThread
 import time
 from tools import config
 
-CURSOR_TIMEOUT = int(config.get('cursor_timeout', "0")) # Disabled by default
-CONNECTION_LIFETIME = int(config.get('connection_lifetime', "300")) # 5 minutes by default
+CURSOR_TIMEOUT = config.get('cursor_timeout')
+CONNECTION_LIFETIME = config.get('connection_lifetime')
 
 psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)
 
@@ -171,16 +171,14 @@ class Cursor(object):
         self.sql_log_count = 0
         self.__closed = True # avoid the call of close() (by __del__) if an exception
                              # is raised by any of the following initialisations
-        self.executing = False
         self._pool = pool
         self.dbname = dbname
 
         # Whether to enable snapshot isolation level for this cursor.
         # see also the docstring of Cursor.
         self._serialized = serialized
+        self.get_new_cursor()
 
-        self._cnx = pool.borrow(dsn(dbname))
-        self._obj = self._cnx.cursor(cursor_factory=psycopg1cursor)
         if self.sql_log:
             self.__caller = frame_codeinfo(currentframe(),2)
         else:
@@ -190,6 +188,10 @@ class Cursor(object):
         self.__closer = False
 
         self._default_log_exceptions = True
+
+    def get_new_cursor(self):
+        self._cnx = self._pool.borrow(dsn(self.dbname))
+        self._obj = self._cnx.cursor(cursor_factory=psycopg1cursor)
 
     def __del__(self):
         if not self.__closed and not self._cnx.closed:
@@ -210,7 +212,6 @@ class Cursor(object):
     def execute(self, query, params=None, log_exceptions=None):
         self._cnx.init_time
         self._cnx.last_execution_time = time.time()
-        self._cnx.executing = True
         if '%d' in query or '%f' in query:
             _logger.warning(query)
             _logger.warning("SQL queries cannot contain %d or %f anymore. "
@@ -221,6 +222,8 @@ class Cursor(object):
 
         try:
             params = params or None
+            if self._obj.closed:
+                self.get_new_cursor()
             res = self._obj.execute(query, params)
         except psycopg2.ProgrammingError, pe:
             if (self._default_log_exceptions if log_exceptions is None else log_exceptions):
@@ -230,7 +233,6 @@ class Cursor(object):
             if (self._default_log_exceptions if log_exceptions is None else log_exceptions):
                 _logger.exception("bad query: %s", self._obj.query or query)
             raise
-        self._cnx.executing = False
 
         if self.sql_log:
             delay = mdt.now() - now
@@ -307,16 +309,16 @@ class Cursor(object):
         self.__closed = True
 
         # Clean the underlying connection.
-        self._cnx.rollback()
+        if not self._cnx.closed:
+            self._cnx.rollback()
 
-        if leak:
-            self._cnx.leaked = True
-            self._cnx.close()
-        else:
-            chosen_template = tools.config['db_template']
-            templates_list = tuple(set(['template0', 'template1', 'postgres', chosen_template]))
-            keep_in_pool = self.dbname not in templates_list
-            self._pool.give_back(self._cnx, keep_in_pool=keep_in_pool)
+            if leak:
+                self._cnx.leaked = True
+            else:
+                chosen_template = tools.config['db_template']
+                templates_list = tuple(set(['template0', 'template1', 'postgres', chosen_template]))
+                keep_in_pool = self.dbname not in templates_list
+                self._pool.give_back(self._cnx, keep_in_pool=keep_in_pool)
 
     @check
     def autocommit(self, on):
@@ -406,7 +408,7 @@ class ConnectionPool(object):
         # free dead and leaked connections
         time_now = time.time()
         for i, (cnx, _) in tools.reverse_enumerate(self._connections):
-            if (cnx.closed or (not cnx.executing and time_now - cnx.init_time > CONNECTION_LIFETIME) or (cnx.executing and CURSOR_TIMEOUT and time_now - cnx.last_execution_time > CURSOR_TIMEOUT)):
+            if (cnx.closed or cnx.status == psycopg2.extensions.STATUS_READY and (CONNECTION_LIFETIME and time_now - cnx.init_time > CONNECTION_LIFETIME) or (CURSOR_TIMEOUT and time_now - cnx.last_execution_time > CURSOR_TIMEOUT)):
                 self._connections.pop(i)
                 self._debug('Removing closed connection at index %d: %r', i, cnx.dsn)
                 if not cnx.closed:
@@ -438,7 +440,6 @@ class ConnectionPool(object):
             for i, (cnx, used) in enumerate(self._connections):
                 if not used:
                     self._connections.pop(i)
-                    cnx.close()
                     self._debug('Removing old connection at index %d: %r', i, cnx.dsn)
                     break
             else:

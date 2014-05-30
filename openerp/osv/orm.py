@@ -41,6 +41,7 @@
 
 """
 
+import os
 import calendar
 import copy
 import datetime
@@ -54,14 +55,18 @@ import time
 import types
 from lxml import etree
 from functools import wraps
+import random
+import string
+import base64
 
 import fields
 import openerp
 import openerp.netsvc as netsvc
 import openerp.tools as tools
-from openerp.tools.config import config
+from openerp.tools import config
 from openerp.tools.safe_eval import safe_eval as eval
 from openerp.tools.translate import _
+from openerp.tools.osutil import ALLLOWED_DIR_CHARS
 from openerp import SUPERUSER_ID
 from query import Query
 import osv
@@ -373,6 +378,9 @@ class browse_record(object):
 
         self._cache = cache
 
+    def after_fnct_proxy_run(self, name, *args, **kw):
+        return True
+
     def __getitem__(self, name):
         if name == 'id':
             return self._id
@@ -391,7 +399,9 @@ class browse_record(object):
                     def function_proxy(*args, **kwargs):
                         if 'context' not in kwargs and self._context:
                             kwargs.update(context=self._context)
-                        return attr(self._cr, self._uid, [self._id], *args, **kwargs)
+                        res = attr(self._cr, self._uid, [self._id], *args, **kwargs)
+                        self.after_fnct_proxy_run(name, *args, **kwargs)
+                        return res
                     return function_proxy
                 else:
                     return attr
@@ -418,7 +428,7 @@ class browse_record(object):
 
             # TODO: improve this, very slow for reports
             if self._fields_process:
-                lang = self._context.get('lang', 'en_US') or 'en_US'
+                lang = self._context.get('lang', 'en_GB') or 'en_GB'
                 lang_obj_ids = self.pool.get('res.lang').search(self._cr, self._uid, [('code', '=', lang)])
                 if not lang_obj_ids:
                     raise Exception(_('Language with code "%s" is not defined in your system !\nDefine it through the Administration menu.') % (lang,))
@@ -588,7 +598,12 @@ def get_pg_type(f, type_override=None):
     :returns: (postgres_identification_type, postgres_type_specification)
     :rtype: (str, str)
     """
+    if isinstance(f, fields.binary) and getattr(f, 'uploadfolder'):
+                            # f._type = 'char'
+                            f.size = 1024
+                            type_override = fields.char
     field_type = type_override or type(f)
+
 
     if field_type in FIELDS_TO_PGTYPES:
         pg_type =  (FIELDS_TO_PGTYPES[field_type], FIELDS_TO_PGTYPES[field_type])
@@ -1127,8 +1142,9 @@ class BaseModel(object):
                             query_update = False
                             WHERE name=%s''', (query, view_name))
             else:
-                cr.execute('''INSERT INTO ea_pg_matviews (name, view_query, query_update) VALUES 
-                            (%s, %s, False)''', (view_name, query))
+                cr.execute('''DELETE FROM ea_pg_matviews WHERE name=%s;
+                              INSERT INTO ea_pg_matviews (name, view_query, query_update) VALUES
+                            (%s, %s, False)''', (view_name, view_name, query))
             return True
         #TODO: check version and if < 9.3 remove materialised view and run create_replace_view method
         if self.get_postgres_version(cr) < 9.3:
@@ -1143,10 +1159,12 @@ class BaseModel(object):
 
         view_query_existing = ''
         if ea_pg_matviews_exists:
-            #get view query if exists in ea_pg_matviews
-            cr.execute('''SELECT view_query from ea_pg_matviews WHERE name = '%s' ''' % view_name)
+            #get view query if exists in ea_pg_matviews an view was_created
+            cr.execute('''SELECT epm.view_query, pm.matviewname from ea_pg_matviews epm
+                        LEFT JOIN pg_matviews pm ON pm.matviewname = epm.name
+                        WHERE epm.name = %s ''', (view_name,))
             query_result = cr.fetchone()
-            if query_result:
+            if query_result and query_result[1]:
                 view_query_existing = query_result[0]
                 kwargs.update({'view_query_existing': view_query_existing})
         else:
@@ -1155,6 +1173,7 @@ class BaseModel(object):
             name char(128) CONSTRAINT firstkey PRIMARY KEY,
             view_query text,
             query_update boolean) ''')
+
 
         if not view_query_existing:
             #remove from views in case it's present there
@@ -1572,7 +1591,7 @@ class BaseModel(object):
 
     def _validate(self, cr, uid, ids, context=None):
         context = context or {}
-        lng = context.get('lang', False) or 'en_US'
+        lng = context.get('lang', False) or 'en_GB'
         trans = self.pool.get('ir.translation')
         error_msgs = []
         for constraint in self._constraints:
@@ -2156,8 +2175,9 @@ class BaseModel(object):
         :raise Invalid ArchitectureError: if there is view type other than form, tree, calendar, search etc defined on the structure
 
         """
+        ir_model_access = self.pool.get('ir.model.access')
         if not self._auto:
-            cr.execute(''' select table_name from information_schema.tables where table_name = 'ea_pg_matviews' ''')
+            cr.execute(''' SELECT table_name from information_schema.tables where table_name = 'ea_pg_matviews' ''')
             if cr.fetchall():
                 cr.execute('''SELECT name FROM ea_pg_matviews
                             WHERE query_update in (False, Null)
@@ -2165,7 +2185,10 @@ class BaseModel(object):
                 query_result = cr.fetchall()
                 if query_result:
                     raise except_orm(_('View Error'),
-                            _('Please refresh materialized View of current model in Scheduled Actions'))
+                            _('Please refresh materialized View of current model in Scheduled Actions1:\
+                               go to menu "Settings/Configuration/Scheduled Actions" and press "Run" button\
+                               where "Object" = %s' % self._name ))
+
         inheritance_chain = []
         if context is None:
             context = {}
@@ -2304,23 +2327,6 @@ class BaseModel(object):
                 source = apply_inheritance_specs(source, view_arch, view_id)
                 source = apply_view_inheritance(cr, user, source, view_id)
             return source
-        def remove_pentaho_file(cr, user, resprint=None, context=None):
-            if type(resprint) == list:
-                resprint_modified = []
-                for item in resprint:
-                    item_value = item
-                    if type(item_value) == tuple:
-                        item_value_result = []
-                        for subitem in item_value:
-                            subitem_value = subitem
-                            if type(subitem_value) == dict:
-                                if subitem_value.get('pentaho_file'):
-                                    subitem_value['pentaho_file'] = ''
-                            item_value_result.append(subitem_value)
-                        item_value = tuple(item_value_result)
-                    resprint_modified.append(item_value)
-                resprint = resprint_modified
-            return resprint
 
         result = {'type': view_type, 'model': self._name}
 
@@ -2366,8 +2372,18 @@ class BaseModel(object):
         # if a view was found
         if sql_res:
             source = etree.fromstring(encode(sql_res['arch']))
+            arch = apply_view_inheritance(cr, user, source, sql_res['id'])
+            specs_tree = arch
+            #if user is in write_groups: can write to group
+            readonly_groups_attrs = specs_tree.findall(".//group[@write_groups]")
+            for group_attr in readonly_groups_attrs:
+                groups = group_attr.attrib['write_groups'].split(',')
+                can_read = any(ir_model_access.check_groups(cr, user, group) for group in groups)
+                if not can_read:
+                    group_attr.attrib['readonly'] = "1"
+
             result.update(
-                arch=apply_view_inheritance(cr, user, source, sql_res['id']),
+                arch=arch,
                 type=sql_res['type'],
                 view_id=sql_res['id'],
                 name=sql_res['name'],
@@ -2395,7 +2411,6 @@ class BaseModel(object):
         xarch, xfields = self.__view_look_dom_arch(cr, user, result['arch'], view_id, context=ctx)
         result['arch'] = xarch
         result['fields'] = xfields
-
         if toolbar:
             def clean(x):
                 x = x[2]
@@ -2409,7 +2424,7 @@ class BaseModel(object):
             resprint = ir_values_obj.get(cr, user, 'action',
                     'client_print_multi', [(self._name, False)], False,
                     context)
-            resprint = remove_pentaho_file(cr, user, resprint=resprint, context=None)
+
             resaction = ir_values_obj.get(cr, user, 'action',
                     'client_action_multi', [(self._name, False)], False,
                     context)
@@ -2417,8 +2432,8 @@ class BaseModel(object):
             resrelate = ir_values_obj.get(cr, user, 'action',
                     'client_action_relate', [(self._name, False)], False,
                     context)
-            resaction = [clean(action) for action in resaction
-                         if view_type == 'tree' or not action[2].get('multi')]
+            resaction = [clean(act) for act in resaction
+                         if view_type == 'tree' or not act[2].get('multi')]
             resprint = [clean(print_) for print_ in resprint
                         if view_type == 'tree' or not print_[2].get('multi')]
             resrelate = map(lambda x: x[2], resrelate)
@@ -2432,6 +2447,40 @@ class BaseModel(object):
                 'relate': resrelate
             }
         result['inheritance_chain'] = get_inheritance_chain_string_list()
+        cntx_t = context.copy()
+        if cntx_t.get('active_id'): del cntx_t['active_id']
+        if cntx_t.get('active_ids'): del cntx_t['active_ids']
+        if cntx_t.get('active_model'): del cntx_t['active_model']
+        result['context_menu'] = self.context_menu_get(cr, user, context=cntx_t)
+        return result
+
+    def context_menu_get(self, cr, uid, model_name=None, context={}):
+        result = {}
+        model_name = model_name or self._name
+        ir_action_object_pool = self.pool.get('ir.actions.object')
+        ir_action_window_pool = self.pool.get('ir.actions.act_window')
+        window_action_ids = ir_action_window_pool.search(cr, uid,
+            [('context_menu', '=', True), ('src_model', '=', model_name)], context=context)
+        result['act_window'] = ir_action_window_pool.read(cr, uid, window_action_ids, context=context)
+        object_action_ids = ir_action_object_pool.search(cr, uid,
+            [('model_name', '=', model_name)], context=context)
+        result['act_object'] = ir_action_object_pool.read(cr, uid, object_action_ids, context=context)
+        return result
+
+    def get_view(self, cr, uid, view_id=None, view_type='form', context=None, toolbar=False, submenu=False, action_id=None):
+        result = self.fields_view_get(cr, uid, view_id=view_id, view_type=view_type, context=context, toolbar=toolbar, submenu=submenu)
+        window_pool = self.pool.get('ir.actions.act_window')
+        if action_id and toolbar:
+            action_dict = window_pool.read(cr, uid, action_id, fields=['invisible_action_ids', 'invisible_link_ids', 'invisible_report_ids'], context=context)
+            if action_dict.get('invisible_action_ids') and result['toolbar'].get('action'):
+                invisible_actions = map(lambda x: x['name'], window_pool.read(cr, uid, action_dict['invisible_action_ids'], fields=['name'], context=context))
+                result['toolbar']['action'] = [ra for ra in result['toolbar']['action'] if ra.get('name') not in invisible_actions]
+            if action_dict.get('invisible_link_ids') and result['toolbar'].get('relate'):
+                invisible_actions = map(lambda x: x['name'], window_pool.read(cr, uid, action_dict['invisible_link_ids'], fields=['name'], context=context))
+                result['toolbar']['relate'] = [rl for rl in result['toolbar']['relate'] if rl.get('name') not in invisible_actions]
+            if action_dict.get('invisible_report_ids') and result['toolbar'].get('print'):
+                invisible_reports = map(lambda x: x['name'], window_pool.read(cr, uid, action_dict['invisible_report_ids'], fields=['name'], context=context))
+                result['toolbar']['print'] = [rp for rp in result['toolbar']['print'] if rp.get('name') not in invisible_reports]
         return result
 
     _view_look_dom_arch = __view_look_dom_arch
@@ -2479,7 +2528,7 @@ class BaseModel(object):
 
         Here is an example of searching for Partners named *ABC* from Belgium and Germany whose language is not english ::
 
-            [('name','=','ABC'),'!',('language.code','=','en_US'),'|',('country_id.code','=','be'),('country_id.code','=','de'))
+            [('name','=','ABC'),'!',('language.code','=','en_GB'),'|',('country_id.code','=','be'),('country_id.code','=','de'))
 
         The '&' is omitted as it is the default, and of course we could have used '!=' for the language, but what this domain really represents is::
 
@@ -2528,7 +2577,7 @@ class BaseModel(object):
            :rtype: list
            :return: list of pairs ``(id,text_repr)`` for all matching records.
         """
-        return self._name_search(cr, user, name, args, operator, context, limit)
+        return self._name_search(cr, user, name=name, args=args, operator=operator, context=context, limit=limit)
 
     def name_create(self, cr, uid, name, context=None):
         """Creates a new record by calling :meth:`~.create` with only one
@@ -2883,7 +2932,8 @@ class BaseModel(object):
                     reverse = False
             else:
                 continue
-            result = sorted(result, key=lambda k: k[order_field], reverse=reverse)
+            if result and result[0] and order_field in result[0].keys():
+                result = sorted(result, key=lambda k: k[order_field], reverse=reverse)
         return result
 
     def _inherits_join_add(self, current_table, parent_model_name, query):
@@ -3362,7 +3412,12 @@ class BaseModel(object):
     def _auto_end(self, cr, context=None):
         """ Create the foreign keys recorded by _auto_init. """
         for t, k, r, d in self._foreign_keys:
-            cr.execute('ALTER TABLE "%s" ADD FOREIGN KEY ("%s") REFERENCES "%s" ON DELETE %s' % (t, k, r, d))
+            cr.execute('''SELECT table_name
+                          FROM information_schema.tables
+                          WHERE table_type='BASE TABLE'
+                          AND table_name=%s ''', (r, ))
+            if cr.fetchall():
+                cr.execute('ALTER TABLE "%s" ADD FOREIGN KEY ("%s") REFERENCES "%s" ON DELETE %s' % (t, k, r, d))
         cr.commit()
         del self._foreign_keys
 
@@ -3684,17 +3739,22 @@ class BaseModel(object):
                 continue
 
             res[f] = fields.field_to_dict(self, cr, user, field, context=context)
-
+            cntx = context.copy()
+            if cntx.get('active_id'): del cntx['active_id']
+            if cntx.get('active_ids'): del cntx['active_ids']
+            if cntx.get('active_model'): del cntx['active_model']
+            if res[f].get('type') in ('one2many', 'many2many'):
+                res[f]['context_menu'] = self.context_menu_get(cr, user, model_name=res[f].get('relation'), context=cntx)
             if not write_access:
                 res[f]['readonly'] = True
                 res[f]['states'] = {}
 
             if 'string' in res[f]:
-                res_trans = translation_obj._get_source(cr, user, self._name + ',' + f, 'field', context.get('lang', False) or 'en_US')
+                res_trans = translation_obj._get_source(cr, user, self._name + ',' + f, 'field', context.get('lang', False) or 'en_GB')
                 if res_trans:
                     res[f]['string'] = res_trans
             if 'help' in res[f]:
-                help_trans = translation_obj._get_source(cr, user, self._name + ',' + f, 'help', context.get('lang', False) or 'en_US')
+                help_trans = translation_obj._get_source(cr, user, self._name + ',' + f, 'help', context.get('lang', False) or 'en_GB')
                 if help_trans:
                     res[f]['help'] = help_trans
             if 'selection' in res[f]:
@@ -3704,10 +3764,13 @@ class BaseModel(object):
                     for key, val in sel:
                         val2 = None
                         if val:
-                            val2 = translation_obj._get_source(cr, user, self._name + ',' + f, 'selection', context.get('lang', False) or 'en_US', val)
+                            val2 = translation_obj._get_source(cr, user, self._name + ',' + f, 'selection', context.get('lang', False) or 'en_GB', val)
                         sel2.append((key, val2 or val))
                     res[f]['selection'] = sel2
-
+            if hasattr(field, 'uploadfolder'):
+                res[f]['uploadfolder'] = getattr(field, 'uploadfolder')
+                if hasattr(field, 'image_size'):
+                    res[f]['image_size'] = getattr(field, 'image_size')
         return res
 
     def read(self, cr, user, ids, fields=None, context=None, load='_classic_read'):
@@ -3785,7 +3848,10 @@ class BaseModel(object):
                         return "COALESCE(%s.write_date, %s.create_date, (now() at time zone 'UTC'))::timestamp AS %s" % (self._table, self._table, f,)
                     return "(now() at time zone 'UTC')::timestamp AS %s" % (f,)
                 if isinstance(self._columns[f], fields.binary) and context.get('bin_size', False):
-                    return 'length(%s) as "%s"' % (f_qual, f)
+                    if self._columns[f].uploadfolder:
+                        return '%s as "%s"' % (f_qual, f)
+                    else:
+                        return 'length(%s) as "%s"' % (f_qual, f)
                 return f_qual
 
             fields_pre2 = map(convert_field, fields_pre)
@@ -3807,14 +3873,13 @@ class BaseModel(object):
                 res.extend(cr.dictfetchall())
         else:
             res = map(lambda x: {'id': x}, ids)
-
         for f in fields_pre:
             if f == self.CONCURRENCY_CHECK_FIELD:
                 continue
             if self._columns[f].translate:
                 ids = [x['id'] for x in res]
                 #TODO: optimize out of this loop
-                res_trans = self.pool.get('ir.translation')._get_ids(cr, user, self._name+','+f, 'model', context.get('lang', False) or 'en_US', ids)
+                res_trans = self.pool.get('ir.translation')._get_ids(cr, user, self._name+','+f, 'model', context.get('lang', False) or 'en_GB', ids)
                 for r in res:
                     r[f] = res_trans.get(r['id'], False) or r[f]
 
@@ -3842,7 +3907,18 @@ class BaseModel(object):
         if fields_post:
             for r in res:
                 for f in fields_post:
-                    r[f] = self._columns[f]._symbol_get(r[f])
+                    if isinstance(self._columns[f], fields.binary) and getattr(self._columns[f], 'uploadfolder'):
+                        file_link = self._columns[f]._symbol_get(r[f])
+                        r[f] = ''
+                        if file_link:
+                            absolute_path = os.path.join(config['images_root'], cr.dbname, file_link)
+                            try:
+                                with open(absolute_path, 'rb') as filecontent:
+                                    r[f] = base64.b64encode(filecontent.read())
+                            except:
+                                _logger.error('Unable to open %s - no such file!' % absolute_path)
+                    else:
+                        r[f] = self._columns[f]._symbol_get(r[f])
         ids = [x['id'] for x in res]
 
         # all non inherited fields for which the attribute whose name is in load is False
@@ -4223,19 +4299,21 @@ class BaseModel(object):
                                 (self._table, self._parent_name, parent_order)
                 cr.execute(query, (tuple(ids),))
             parents_changed = map(operator.itemgetter(0), cr.fetchall())
-
         upd0 = []
         upd1 = []
         upd_todo = []
         updend = []
         direct = []
-        totranslate = context.get('lang', False) and (context['lang'] != 'en_US')
+        totranslate = context.get('lang', False) and (context['lang'] != 'en_GB')
         for field in vals:
             if field in self._columns:
                 if self._columns[field]._classic_write and not (hasattr(self._columns[field], '_fnct_inv')):
                     if (not totranslate) or not self._columns[field].translate:
                         upd0.append('"'+field+'"='+self._columns[field]._symbol_set[0])
-                        upd1.append(self._columns[field]._symbol_set[1](vals[field]))
+                        if self._columns[field]._type == 'binary' and self._columns[field].uploadfolder:
+                            upd1.append(vals[field])
+                        else:
+                            upd1.append(self._columns[field]._symbol_set[1](vals[field]))
                         if self._columns[field]._type == 'one2one':
                             self._update_reverse_one2one(cr, user, ids, field, vals[field], context=context)
                     direct.append(field)
@@ -4247,7 +4325,6 @@ class BaseModel(object):
                     and hasattr(self._columns[field], 'selection') \
                     and vals[field]:
                 self._check_selection_field_value(cr, user, field, vals[field], context=context)
-
         if self._log_access:
             upd0.append('write_uid=%s')
             upd0.append("write_date=(now() at time zone 'UTC')")
@@ -4273,7 +4350,6 @@ class BaseModel(object):
                             self.write(cr, user, ids, {f: vals[f]})
                         self.pool.get('ir.translation')._set_ids(cr, user, self._name+','+f, 'model', context['lang'], ids, vals[f], src_trans)
 
-
         # call the 'set' method of fields which are not classic_write
         upd_todo.sort(lambda x, y: self._columns[x].priority-self._columns[y].priority)
 
@@ -4286,7 +4362,6 @@ class BaseModel(object):
         for field in upd_todo:
             for id in ids:
                 result += self._columns[field].set(cr, self, id, field, vals[field], user, context=rel_context) or []
-
         unknown_fields = updend[:]
         for table in self._inherits:
             col = self._inherits[table]
@@ -4309,7 +4384,6 @@ class BaseModel(object):
                 'No such field(s) in model %s: %s.',
                 self._name, ', '.join(unknown_fields))
         self._validate(cr, user, ids, context)
-
         # TODO: use _order to set dest at the right position and not first node of parent
         # We can't defer parent_store computation because the stored function
         # fields that are computer may refer (directly or indirectly) to
@@ -4386,12 +4460,85 @@ class BaseModel(object):
             self.notify_subscribers(cr, user, ids, vals, context=context)
         return True
 
+    def check_duplicates(self, new_file_path):
+        current = '001'
+        file_name, file_extension = os.path.splitext(new_file_path)
+        file_name = '%s_%s%s' % (file_name, current, file_extension)
+        while True:
+            if not os.path.isfile(file_name):
+                break
+            new_version = str(int(current) + 1).zfill(len(current))
+            file_name = file_name.replace('_' + current, '_' + new_version) # TOFINISH
+            current = new_version
+        return file_name
+
+    def upload_image(self, cr, uid, record_id, values, field_name, uploadfolder, image_file, content=False, filename=False, context={}):
+        IMAGES_STORE_ROOT = config['images_root']
+        file_content = content or image_file.read()
+        filename = filename or image_file.filename
+        folder_name = self.get_binary_folder_name(cr, uid, record_id, values, field_name, uploadfolder)  # TODO make to work with create
+        filename = self.sanitise_folder_name(filename, separators=False)
+        new_file_path = self.check_duplicates(os.path.join(folder_name, filename))
+        with open(new_file_path, 'wb') as output_file:
+            output_file.write(file_content)
+        relative_path = getattr(new_file_path, 'replace')(os.path.join(IMAGES_STORE_ROOT, cr.dbname), '')[1:]
+        return relative_path
+
+    def sanitise_folder_name(self, dir_name, separators=True):
+        for char in dir_name:
+            if char not in ALLLOWED_DIR_CHARS:
+                dir_name = dir_name.replace(char, '')
+                if not separators and char in '/\\':
+                    dir_name = dir_name.replace(char, '')
+        return dir_name
+
+    def get_binary_folder_name(self, cr, uid, record_id, vals, field_name, uploadfolder):
+        """Construct folder structure for binary field storage file_path
+        according to rules defined in uploadfolder attribute"""
+        IMAGES_STORE_ROOT = config['images_root']
+        folder_name = os.path.join(IMAGES_STORE_ROOT, cr.dbname, self._table, field_name)
+        for field in uploadfolder.split(','):
+            name = field
+            if field in self._columns:
+                field_type = self._columns[field]._type
+                if field_type in ['one2many', 'many2many', 'binary', 'selection', 'related', 'property']:
+                    _logger.warning('Can not calculate storage path with %s' % field)
+
+                elif field_type in ['float', 'integer', 'char', 'text', 'date', 'datetime']:
+                    if field in vals:
+                            name = vals[field]
+                            if field_type not in ['float', 'integer']:
+                                name = str(name)
+                    else:
+                        query = """ SELECT %s
+                                    FROM %s
+                                    WHERE id = %s""" % (field, self._table, record_id)
+                        cr.execute(query)
+                        res = cr.fetchone()
+                        name = res and res[0] or name
+
+                elif field_type == 'many2one':
+                    if field in vals:
+                        target_id = vals[field]
+                    else:
+                        query = """SELECT %s
+                                    FROM %s
+                                    WHERE id = %s""" % (field, self._table, record_id)
+                        cr.execute(query)
+                        target_id = cr.fetchone()[0]
+                    if target_id:
+                        name = str(self.pool.get(self._columns[field]._obj).name_get(cr, uid, [target_id])[0][1])
+            folder_name = os.path.join(folder_name, name)
+        folder_name = self.sanitise_folder_name(folder_name)
+        if not os.path.isdir(folder_name):
+            os.makedirs(folder_name)
+        return folder_name
+
     def notify_subscribers(self, cr, uid, ids, values, context={}):
         for obj in self.browse(cr, uid, ids, context=context):
             for subscriber_field, (subscriber_triger_fields, subscriber_method) in self._subscribers.items():
                 if set(subscriber_triger_fields) & set(values.keys()):
                     ids_to_update = None
-                    print subscriber_field, subscriber_triger_fields, subscriber_method
                     if self._columns.get(subscriber_field)._type == 'many2one':
                         ids_to_update = getattr(obj, subscriber_field) and [getattr(obj, subscriber_field).id, ] or None
                     elif self._columns.get(subscriber_field)._type in ('one2many', 'many2many'):
@@ -4605,7 +4752,10 @@ class BaseModel(object):
             if self._columns[field]._classic_write:
                 upd0 = upd0 + ',"' + field + '"'
                 upd1 = upd1 + ',' + self._columns[field]._symbol_set[0]
-                upd2.append(self._columns[field]._symbol_set[1](vals[field]))
+                if isinstance(self._columns[field], fields.binary) and self._columns[field].uploadfolder:
+                    upd2.append(vals[field])
+                else:
+                    upd2.append(self._columns[field]._symbol_set[1](vals[field]))
             else:
                 if not isinstance(self._columns[field], fields.related):
                     upd_todo.append(field)

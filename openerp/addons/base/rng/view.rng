@@ -558,6 +558,8 @@
             <rng:optional><rng:attribute name="statusbar_colors"/></rng:optional>
             <rng:optional><rng:attribute name="move_forward"/></rng:optional>
             <rng:optional><rng:attribute name="expandable"/></rng:optional>
+            <rng:optional><rng:attribute name="quick_create"/></rng:optional>
+            <rng:optional><rng:attribute name="show_input"/></rng:optional>
             <!-- Widget *static* options defined as an arbitrary JSON dict, with
                  widget-dependent parameters. To be ignored if widget/client does
                  not support them. -->

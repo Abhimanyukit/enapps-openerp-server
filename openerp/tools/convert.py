@@ -676,13 +676,8 @@ form: module.record_id""" % (xml_id,)
             g_names = rec.get('groups','').split(',')
             groups_value = []
             for group in g_names:
-                if group.startswith('-'):
-                    group_id = self.id_get(cr, group[1:])
-                    groups_value.append((3, group_id))
-                else:
-                    group_id = self.id_get(cr, group)
-                    groups_value.append((4, group_id))
-            values['groups_id'] = groups_value
+                groups_value.append(self.id_get(cr, group))
+            values['groups_id'] = ([6, 0, groups_value], )
 
         xml_id = rec.get('id','').encode('utf8')
         self._test_xml_id(xml_id)

@@ -159,7 +159,7 @@ class configmanager(object):
                          help="Do not allow any actions from these databases. (Comma separated value)", )
         group.add_option("--domain-list", dest="domain_list", my_default="localhost",
                          help="Comma-separated list of domain on which server available default=localhost")
-        group.add_option("--domain-level-db-name", dest="domain_level_db_name",  my_default=0,
+        group.add_option("--domain-level-db-name", dest="domain_level_db_name", my_default=0,
                          help="Domain level name relative base domain name which is equal database name. For example: production_db.my.company.com where my.company.com is base domain -- domain_level_db_name = 1 ")
         group.add_option("--domain-level-user-name", dest="domain_level_user_name", my_default=0,
                          help="Domain level name which is equal user name. For example: admin.production_db.my.company.com, where my.company.com is base domain -- domain_level_user_name = 2 ")
@@ -167,6 +167,9 @@ class configmanager(object):
                          help="Admin user name")
         group.add_option("--main-domain-for-admin", dest="main_domain_for_admin", my_default=False,
                          help="Redirect all request for main domain to Databases Management page")
+        group.add_option("--images-root", dest="images_root", my_default='/opt/openerp/filestore',
+                         action="callback", callback=self._check_images_root, type="string",
+                         help="Absolute path to images which can be used with 'image' widget")
         parser.add_option_group(group)
 
         # Static HTTP
@@ -305,9 +308,9 @@ class configmanager(object):
                          type="int")
         group.add_option("--unaccent", dest="unaccent", my_default=False, action="store_true",
                          help="Use the unaccent function provided by the database when available.")
-        group.add_option("--connection-lifetime", dest="connection_lifetime", my_default=300, action="store_true",
-                         help="Lifetime of connection in connection pool (seconds). Default 300 sec. For disabling set 0")
-        group.add_option("--cursor-timeout", dest="cursor_timeout", my_default=0, action="store_true",
+        group.add_option("--connection_lifetime", dest="connection_lifetime", my_default=300, type="int",
+                         help="Lifetime of connection in connection pool (seconds). 300 seconds by default. For disabling set 0")
+        group.add_option("--cursor_timeout", dest="cursor_timeout", my_default=0, type="int",
                          help="Timeout of using cursor connection in connection pool (seconds). Disabled by default. For disabling set 0")
         parser.add_option_group(group)
 
@@ -409,8 +412,6 @@ class configmanager(object):
             # ... or keep, but cast, the config file value.
             elif isinstance(self.options[arg], basestring) and self.casts[arg].type in optparse.Option.TYPE_CHECKER:
                 self.options[arg] = optparse.Option.TYPE_CHECKER[self.casts[arg].type](self.casts[arg], arg, self.options[arg])
-
-
         if isinstance(self.options['log_handler'], basestring):
             self.options['log_handler'] = self.options['log_handler'].split(',')
 
@@ -570,6 +571,11 @@ class configmanager(object):
             ad_paths.append(res)
 
         setattr(parser.values, option.dest, ",".join(ad_paths))
+
+    def _check_images_root(self, option, opt, value, parser):
+        if not os.path.isdir(value):
+            raise optparse.OptionValueError("option %s: no such directory: %r" % (opt, value))
+        setattr(parser.values, option.dest, value)
 
     def load(self):
         p = ConfigParser.ConfigParser()

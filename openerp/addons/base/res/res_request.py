@@ -89,7 +89,7 @@ res_request()
 class res_request_link(osv.osv):
     _name = 'res.request.link'
     _columns = {
-        'name': fields.char('Name', size=64, required=True, translate=True),
+        'name': fields.char('Name', size=64, required=True, ),
         'object': fields.char('Object', size=64, required=True),
         'priority': fields.integer('Priority'),
     }

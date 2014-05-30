@@ -11,7 +11,7 @@
 #
 #    This program is distributed in the hope that it will be useful,
 #    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    MERCHANTABILITY or FITNESS FOR APARTICULAR PURPOSE.  See the
 #    GNU Affero General Public License for more details.
 #
 #    You should have received a copy of the GNU Affero General Public License
@@ -25,6 +25,10 @@ Some functions related to the os and os.path module
 
 import os
 from os.path import join as opj
+
+ALLLOWED_DIR_CHARS = """ABCDEFGHIJKLMNOPQRSTUVWXYZ
+abcdefghijklmnopqrstuvwxyz
+0123456789._-/\\"""
 
 def listdir(dir, recursive=False):
 	"""Allow to recursively get the file listing"""

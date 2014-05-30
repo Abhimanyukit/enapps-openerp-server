@@ -35,11 +35,16 @@ import openerp.modules as addons
 import pooler
 import release
 import tools
+try:
+    import git
+except ImportError:
+    git = False
 
 from tools.parse_version import parse_version
 from tools.translate import _
 
 from osv import fields, osv, orm
+from openerp.modules.module import get_module_path
 
 _logger = logging.getLogger(__name__)
 
@@ -73,12 +78,12 @@ class module_category(osv.osv):
         return result
 
     _columns = {
-        'name': fields.char("Name", size=128, required=True, translate=True, select=True),
+        'name': fields.char("Name", size=128, required=True, select=True),
         'parent_id': fields.many2one('ir.module.category', 'Parent Application', select=True),
         'child_ids': fields.one2many('ir.module.category', 'parent_id', 'Child Applications'),
         'module_nr': fields.function(_module_nbr, string='Number of Modules', type='integer'),
         'module_ids' : fields.one2many('ir.module.module', 'category_id', 'Modules'),
-        'description' : fields.text("Description", translate=True),
+        'description' : fields.text("Description", ),
         'sequence' : fields.integer('Sequence'),
         'visible' : fields.boolean('Visible'),
     }
@@ -174,8 +179,8 @@ class module(osv.osv):
     _columns = {
         'name': fields.char("Name", size=128, readonly=True, required=True, select=True),
         'category_id': fields.many2one('ir.module.category', 'Category', readonly=True, select=True),
-        'shortdesc': fields.char('Short Description', size=256, readonly=True, translate=True),
-        'description': fields.text("Description", readonly=True, translate=True),
+        'shortdesc': fields.char('Short Description', size=256, readonly=True, ),
+        'description': fields.text("Description", readonly=True, ),
         'author': fields.char("Author", size=128, readonly=True),
         'maintainer': fields.char('Maintainer', size=128, readonly=True),
         'contributors': fields.text('Contributors', readonly=True),
@@ -225,6 +230,9 @@ class module(osv.osv):
         'complexity': fields.selection([('easy','Easy'), ('normal','Normal'), ('expert','Expert')],
             string='Complexity', readonly=True,
             help='Level of difficulty of module. Easy: intuitive and easy to use for everyone. Normal: easy to use for business experts. Expert: requires technical skills.'),
+        'git_current_branch': fields.char('Git Branch', size=64, ),
+        'git_current_commit': fields.char('Git Commit', size=40, ),
+        'git_repository_name': fields.char('Git Repository name', size=128, ),
     }
 
     _defaults = {
@@ -298,6 +306,26 @@ class module(osv.osv):
             else:
                 msg = _('Unable to process module "%s" because an external dependency is not met: %s')
             raise orm.except_orm(_('Error'), msg % (module_name, e.args[0]))
+
+    def get_installed_modules_git_info(self, cr, uid, context={}):
+        installed_ids = self.search(cr, uid, [('state', '=', 'installed'), ],  context=context)
+        result = []
+        if not git:
+            raise orm.except_orm(_('Error'), "python-git not installed")
+        for module in self.browse(cr, uid, installed_ids, context=context):
+            try:
+                module_repo = git.Repo(get_module_path(module.name))
+            except git.InvalidGitRepositoryError:
+                continue
+            result.append([
+                module.name,
+                module.git_repository_name,
+                module.git_current_branch,
+                module.git_current_commit,
+                module_repo.active_branch.name,
+                module_repo.commit().hexsha,
+            ])
+        return result
 
     def state_update(self, cr, uid, ids, newstate, states_to_update, context=None, level=100):
         if level<1:
